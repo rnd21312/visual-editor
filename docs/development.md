@@ -21,7 +21,7 @@ npm test             # Vitest
 
 ```bash
 npx @wp-playground/cli@latest server \
-  --mount-dir ./suntourz-visual-editor /wordpress/wp-content/plugins/suntourz-visual-editor
+  --mount-dir ./visual-editor /wordpress/wp-content/plugins/visual-editor
 ```
 
 Activate the plugin, log in, open `/?sve_editor=1`. To test with a different theme, install it in the same site — the editor does not depend on one.
@@ -45,7 +45,7 @@ On Windows run the command from PowerShell/cmd (not Git Bash) and use `--mount-d
 
 1. Bump the version in `suntourz-visual-editor.php` (`SVE_VERSION` and header) and `CHANGELOG.md`.
 2. `git tag v0.1.1 && git push --tags`.
-3. The **Release zip** workflow builds the bundles and attaches `suntourz-visual-editor.zip` to the release.
+3. The **Release zip** workflow builds the bundles and attaches `visual-editor.zip` to the release.
 
 ## Contributing
 

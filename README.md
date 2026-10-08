@@ -2,7 +2,7 @@
 
 > A click-to-edit visual editor for **any** WordPress theme. Inspect every element, change text, styles and HTML, move and add elements, save components, manage SEO — and let an AI assistant do it over MCP. No theme files touched.
 
-[![CI](https://github.com/rnd21312/suntourz-visual-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/rnd21312/suntourz-visual-editor/actions/workflows/ci.yml)
+[![CI](https://github.com/rnd21312/visual-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/rnd21312/visual-editor/actions/workflows/ci.yml)
 [![License: GPL v2+](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](LICENSE)
 ![WordPress 6.5+](https://img.shields.io/badge/WordPress-6.5%2B-21759b)
 ![PHP 8.1+](https://img.shields.io/badge/PHP-8.1%2B-777bb4)
@@ -15,9 +15,9 @@ It is one of three independent projects, and it needs **none** of the others:
 
 | Project | Role |
 | --- | --- |
-| [suntourz-theme](https://github.com/rnd21312/suntourz-theme) | Public website design |
-| [suntourz-core](https://github.com/rnd21312/suntourz-core) | Tours, bookings, REST API, admin screens |
-| **suntourz-visual-editor** (this repo) | Visual editor for any theme |
+| [react-theme](https://github.com/rnd21312/react-theme) | Public website design |
+| [booking-core](https://github.com/rnd21312/booking-core) | Tours, bookings, REST API, admin screens |
+| **visual-editor** (this repo) | Visual editor for any theme |
 
 ## Features
 
@@ -55,7 +55,7 @@ It is one of three independent projects, and it needs **none** of the others:
 
 ## Install
 
-1. Download `suntourz-visual-editor.zip` from the [latest release](https://github.com/rnd21312/suntourz-visual-editor/releases/latest).
+1. Download `visual-editor.zip` from the [latest release](https://github.com/rnd21312/visual-editor/releases/latest).
 2. **Plugins → Add New → Upload Plugin** → choose the zip → **Install Now** → **Activate**.
 3. Open **Visual editor** in the dashboard menu, or click **Edit visually** in the admin bar while viewing your site.
 

@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       Suntourz Visual Editor
- * Plugin URI:        https://github.com/rnd21312/suntourz-visual-editor
+ * Plugin URI:        https://github.com/rnd21312/visual-editor
  * Description:       Click-to-edit visual editor for any WordPress theme: inspect every element, change text, styles and HTML, move and add elements, save components, and manage SEO — without touching theme files.
  * Version:           0.1.0
  * Requires at least: 6.5

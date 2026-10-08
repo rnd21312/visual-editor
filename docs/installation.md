@@ -11,19 +11,19 @@
 
 ## From the release zip
 
-1. Download `suntourz-visual-editor.zip` from the [releases page](https://github.com/rnd21312/suntourz-visual-editor/releases).
+1. Download `visual-editor.zip` from the [releases page](https://github.com/rnd21312/visual-editor/releases).
 2. **Plugins → Add New → Upload Plugin** → select the zip → **Install Now** → **Activate**.
 
 ## From source
 
 ```bash
-git clone https://github.com/rnd21312/suntourz-visual-editor.git
-cd suntourz-visual-editor/frontend
+git clone https://github.com/rnd21312/visual-editor.git
+cd visual-editor/frontend
 npm ci
 npm run build          # writes ../dist
 ```
 
-Copy the `suntourz-visual-editor` folder (with `dist/`) into `wp-content/plugins/` and activate it.
+Copy the `visual-editor` folder (with `dist/`) into `wp-content/plugins/` and activate it.
 
 ## Open the editor
 
