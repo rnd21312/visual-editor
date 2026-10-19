@@ -2,23 +2,23 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/) and the project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0]
+
+Merges the Suntourz visual builder into this plugin.
 
 ### Added
-- **AI (MCP)** page in the dashboard: key, permission level, site description, connection test, setup snippets (Claude Code, Claude Desktop, Cursor, VS Code, curl) and a log of AI changes.
-- **Full access** level: the `wp` tool calls any WordPress REST route as the administrator who created the key; `upload_media` adds files by URL.
-- Each site names its MCP server after its domain and tells the AI what the site is, so several sites can be connected at once.
-- `edit` applies several changes in one call, all or nothing, with one revision.
-- **OAuth 2.1** for web AI apps such as Claude.ai connectors: dynamic client registration, consent page, authorization code with PKCE S256, one-hour access tokens and rotating refresh tokens, "Disconnect all apps".
-
-### Changed
-- Six tools instead of seventeen: the tool list went from about 2,250 to about 770 tokens, and a page outline is about 90 % smaller (short ids instead of long selectors).
+- **Builder**: pages and templates (single product / post, archives, search, 404, header, footer) with live data, loops, menus and shortcodes; components with props and slots; React islands; Tailwind; GSAP motion presets; libraries; design tokens; forms; server-side rendering of edits on PHP 8.4+; Persian (RTL) editor interface.
+- **MCP**: about 60 tools, live-editor bridge (screenshots, computed styles), several API keys with levels `read` / `draft` / `live` / `admin`.
+- **OAuth 2.1** for web AI apps (Claude.ai connectors): dynamic client registration, consent page with a level choice, PKCE S256, one-hour access tokens, rotating refresh tokens, "Disconnect all apps".
+- **AI (MCP)** dashboard page: keys, site description, connection test, setup snippets, pending-approval banner, activity log. Each site names its MCP server after its domain.
 
 ### Fixed
-- Approving an AI draft no longer reverts changes saved live in the meantime (three-way merge).
-- Concurrent writes can no longer overwrite each other; the Outline fetch refuses private addresses; revoking a key can no longer be undone by a late request.
-- Embeds added by an administrator survive saves by editors and MCP writes.
-- CSS escapes can no longer smuggle `@import` or `url(javascript:)` past the filter; `.btn--primary` selectors work; `:hover` applies to every selector of a list.
+- Writes to the document are serialised with a database lock.
+- CSS escapes can no longer smuggle `@import`, `url(javascript:)` or `expression()` past the filter.
+- Custom CSS using `selector > child` on a selector list now applies to every selector of the list.
+
+### Changed
+- The overlay-style editor (Dock, classes panel, context menu) is replaced by the builder editor.
 
 ## [0.1.0] — 2026-10-07
 

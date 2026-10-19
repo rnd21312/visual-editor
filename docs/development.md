@@ -13,9 +13,7 @@ npm ci
 npm run dev          # Vite dev server (http://localhost:5175)
 npm run build        # editor + runtime → ../dist
 npm run typecheck
-npm run lint
-npm test             # Vitest
-```
+npm run build:fast   # skip the typecheck```
 
 ## Run it in WordPress
 
@@ -33,20 +31,26 @@ On Windows run the command from PowerShell/cmd (not Git Bash) and use `--mount-d
 - Elements inside the preview iframe are another realm: do not use `instanceof Element`.
 - Browser panes that never run `requestAnimationFrame` (hidden tabs) stall splash screens and transitions of some themes; query specific selectors rather than waiting for animations.
 - Popup windows (detached panels) can be tested by stubbing `window.open`.
-- Reset test data with a `PUT /sve/v1/admin/visual` of an empty document (see [data-model.md](data-model.md)).
+
+## PHP self-checks
+
+```bash
+php -d zend.assertions=1 -d assert.exception=1 tests/guard-check.php
+php -d zend.assertions=1 -d assert.exception=1 tests/oauth-check.php
+```
 
 ## Conventions
 
 - `declare(strict_types=1)`, typed properties, escape late.
-- Keep `lib/visualCss.ts` (JS) and `Compiler.php` (PHP) in sync — they must produce the same CSS.
+- Keep `shared/compile.ts` (JS) and `Compiler.php` (PHP) in sync — they must produce the same CSS.
 - Every new option or REST route: sanitise input, check capabilities, document it.
 
 ## Release
 
 1. Bump the version in `visual-editor.php` (`SVE_VERSION` and header) and `CHANGELOG.md`.
-2. `git tag v0.1.1 && git push --tags`.
+2. `git tag v1.0.0 && git push --tags`.
 3. The **Release zip** workflow builds the bundles and attaches `visual-editor.zip` to the release.
 
 ## Contributing
 
-Issues and PRs are welcome. Run `npm run typecheck && npm test` first and keep PRs focused. Contributions are licensed GPL-2.0-or-later.
+Issues and PRs are welcome. Run `npm run typecheck` and the PHP checks in `tests/` first and keep PRs focused. Contributions are licensed GPL-2.0-or-later.

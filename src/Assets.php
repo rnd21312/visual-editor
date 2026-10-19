@@ -1,6 +1,6 @@
 <?php
 /**
- * Locates the built editor and runtime files (frontend/vite.editor.config.ts → dist/).
+ * Locates the built editor and runtime (frontend/ → dist/).
  * Dev mode: define( 'SVE_VITE_DEV', true ) loads the editor from the Vite dev server (http://localhost:5175).
  *
  * @package VisualEditor
@@ -14,8 +14,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class Assets {
 
-	private const EDITOR  = 'src/editor/main.tsx';
-	private const RUNTIME = 'src/runtime/visual.ts';
+	private const EDITOR = 'src/editor/main.tsx';
 
 	private static function is_dev(): bool {
 		return defined( 'SVE_VITE_DEV' ) && SVE_VITE_DEV;
@@ -36,7 +35,7 @@ final class Assets {
 			$file     = SVE_DIR . 'dist/.vite/manifest.json';
 
 			if ( is_readable( $file ) ) {
-				$decoded = json_decode( (string) file_get_contents( $file ), true );
+				$decoded = json_decode( (string) file_get_contents( $file ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 				if ( is_array( $decoded ) ) {
 					$manifest = $decoded;
 				}
@@ -66,12 +65,16 @@ final class Assets {
 	}
 
 	/**
-	 * URL of the public-page runtime, or null when it has not been built.
+	 * The public runtime (a small self-contained script, printed inline where a page needs it).
 	 */
-	public static function runtime_url(): ?string {
-		$chunk = self::manifest()[ self::RUNTIME ] ?? null;
+	public static function runtime_code(): ?string {
+		static $code = false;
+		if ( false === $code ) {
+			$file = SVE_DIR . 'dist/runtime.js';
+			$code = is_readable( $file ) ? str_replace( '</script', '<\/script', (string) file_get_contents( $file ) ) : null; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		}
 
-		return null === $chunk ? null : SVE_URL . 'dist/' . $chunk['file'];
+		return $code;
 	}
 
 	/**

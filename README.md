@@ -1,6 +1,6 @@
 # Visual Editor
 
-> A click-to-edit visual editor for **any** WordPress theme. Inspect every element, change text, styles and HTML, move and add elements, save components, manage SEO — and let an AI assistant do it over MCP. No theme files touched.
+> A visual site builder and click-to-edit editor for **any** WordPress theme — build pages and templates, style every element per device, reusable components, React islands, motion, SEO — and let an AI assistant work on the site with you over MCP. No theme files touched.
 
 [![CI](https://github.com/rnd21312/visual-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/rnd21312/visual-editor/actions/workflows/ci.yml)
 [![License: GPL v2+](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](LICENSE)
@@ -21,32 +21,25 @@ It is one of three independent projects, and it needs **none** of the others:
 
 ## Features
 
-**Edit**
-- **Click anything** to select it; the breadcrumb, selector and match count show exactly what a rule will hit.
-- **Style panel** — spacing, typography, colours, background, border, size, layout, shadow, plus *All* computed properties and any custom property. `:hover`, `:focus` and `:active` states.
-- **Content panel** — text (or double-click on the page), links, image URLs, any attribute, inner HTML, per-device visibility.
-- **CSS panel** — your own CSS with a `selector` placeholder.
-- **Desktop / Tablet / Mobile** previews with real media queries.
-- **Classes** — edit a class once and every element using it follows.
-- **Scope** — *This page*, *This template* or *Whole site*.
+**Edit any element of any page**
+- Click to select; style per **device** (desktop / tablet / mobile) and **state** (hover, focus, active, `::before`, `::after`); edit text inline; move (drag), duplicate, hide per device, delete, change tag, custom CSS.
+- **Scopes**: one page, a whole template (every product / post / category page) or the whole site.
+- Dockable panels, layers tree, right-click menu, multi-select, undo / redo, **Ctrl+S** to publish. Nothing is live until you save.
 
-**Structure**
-- **Elements tree** (including `<head>`), drag-and-drop reordering, **Alt-drag** to nudge freely.
-- **Add** tags, raw HTML, embed snippets (scripts run), JSON-LD, or reusable **components**.
-- Right-click menu: copy / cut / paste, duplicate, group / ungroup, move, copy-paste style, save as component, copy selector, reset, delete. **Ctrl+click** multi-select.
-- Undo / redo, **Ctrl+S** to publish — nothing is live until you save.
-
-**Templates & pages**
-- A page picker with search and filters (pages, posts, products…). Product pages, posts and category archives are *templates*: edit once, every URL follows.
+**Build**
+- **Builder pages** (theme / full page / blank canvas) and **builder templates** (single product, single post, archives, search, 404, header, footer) with live data — `{{ post.title }}`, `{{ product.price_html }}`, loops, menus, shortcodes, Gutenberg blocks.
+- **Components** with props and slots, **React islands** (any npm package via esm.sh), shadcn-style UI kit, **GSAP motion** presets, **Tailwind CSS** compiled in the editor, libraries (Swiper, Alpine, Lenis, Lottie…), design tokens and Google fonts.
+- Pages, posts, WooCommerce products, menus, media, forms, revisions, export / import. Persian (RTL) interface when the user language is Persian.
 
 **SEO**
-- Page audit (title, description, H1, heading order, image alt, link text…), Google preview, per-page / per-template title, description, share image, canonical, noindex / nofollow and JSON-LD. Works with Yoast, Rank Math or on its own.
+- Per page / template title, description, share image, canonical, robots and JSON-LD; page audit. Works with Yoast, Rank Math, AIOSEO, SEOPress or on its own.
 
-**AI access (MCP)**
-- An MCP endpoint lets Claude Code or any MCP client find pages, read their structure, and propose or apply edits — with draft approval, rate limits, validation and revision history. See [docs/ai-mcp.md](docs/ai-mcp.md).
+**AI (MCP)**
+- A full MCP server (~60 tools): the AI sees pages, edits styles and layouts, builds pages and templates, manages content, and can ask the open editor for screenshots.
+- Several **API keys** with levels `read` · `draft` (you approve) · `live` · `admin`; **OAuth 2.1** so web apps such as Claude.ai connect without a pasted key; a dashboard page with connection test, setup snippets, site description and activity log. See [docs/ai-mcp.md](docs/ai-mcp.md).
 
-**Workspace**
-- Dockable panels: collapse, resize, detach into their own window, focus mode; layout is remembered. Editors can be allowed access by an administrator.
+**Safe by design**
+- Revisions with one-click restore, three-way merge of concurrent saves, DB-locked writes, escape-aware CSS validation, hashed keys and tokens, per-key rate limits. Deactivate the plugin and your theme is untouched.
 
 ## Requirements
 
@@ -68,30 +61,10 @@ Full guide: [docs/installation.md](docs/installation.md).
 | Guide | Contents |
 | --- | --- |
 | [Installation](docs/installation.md) | Install, access control, uninstall |
-| [User guide](docs/user-guide.md) | Every panel, shortcut and workflow |
-| [AI & MCP](docs/ai-mcp.md) | API key, permission levels, tools, limits, examples |
-| [Data model](docs/data-model.md) | How edits are stored and applied, selectors, scopes, REST endpoints |
-| [Architecture](docs/architecture.md) | PHP and React structure, security |
+| [AI & MCP](docs/ai-mcp.md) | Keys, OAuth, permission levels, tools, limits |
+| [Architecture](docs/architecture.md) | PHP and React structure, save pipeline, security |
 | [Development](docs/development.md) | Local setup, tests, release |
-
-## How edits are stored
-
-All edits live in **one option** (`sve_document`): CSS rules, text/attribute edits, structural ops (insert / move / remove / re-tag), components and SEO. A tiny runtime (a few KB gzipped) prints the compiled CSS in `<head>` and replays the ops in the browser. Deactivate the plugin and your theme is exactly as it was.
-
-## Development
-
-```bash
-cd frontend
-npm ci
-npm run dev          # Vite dev server on :5175
-npm run build        # → ../dist
-npm run typecheck && npm test
-```
 
 ## License
 
-Released under the **GNU General Public License v2.0 or later** — see [LICENSE](LICENSE).
-
-## Author
-
-Created and maintained by **theodore-sooske** — Telegram [@theodore-sooske](https://t.me/theodore-sooske).
+GPL-2.0-or-later — see [LICENSE](LICENSE).

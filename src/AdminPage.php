@@ -23,10 +23,9 @@ final class AdminPage {
 	/** @var array{ok: bool, msg: string}|null */
 	private ?array $test = null;
 
-	public function __construct( private VisualEdits $edits ) {}
-
-	public function hooks(): void {
-		add_action( 'admin_menu', array( $this, 'menu' ) );
+	public static function hooks(): void {
+		$page = new self();
+		add_action( 'admin_menu', array( $page, 'menu' ) );
 	}
 
 	public function menu(): void {
@@ -53,18 +52,20 @@ final class AdminPage {
 		$do = isset( $_POST['sve_do'] ) ? sanitize_key( wp_unslash( (string) $_POST['sve_do'] ) ) : '';
 		switch ( $do ) {
 			case 'save':
-				Api::configure(
-					! empty( $_POST['enabled'] ),
-					isset( $_POST['level'] ) ? sanitize_key( wp_unslash( (string) $_POST['level'] ) ) : 'draft',
-					isset( $_POST['about'] ) ? wp_unslash( (string) $_POST['about'] ) : '' // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- sanitised in Api::configure.
-				);
+				Api::set_enabled( ! empty( $_POST['enabled'] ) );
+				Api::set_about( isset( $_POST['about'] ) ? wp_unslash( (string) $_POST['about'] ) : '' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- sanitised in Api::set_about.
+				foreach ( (array) ( $_POST['levels'] ?? array() ) as $id => $value ) { // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+					Api::update_key( sanitize_key( (string) $id ), sanitize_key( (string) $value ), null );
+				}
 				$this->back( 'saved' );
 				break;
 			case 'create':
-				$this->new_key = Api::create_key();
+				$level         = isset( $_POST['level'] ) ? sanitize_key( wp_unslash( (string) $_POST['level'] ) ) : 'draft';
+				$label         = isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['label'] ) ) : '';
+				$this->new_key = Api::create_key( $label, in_array( $level, Api::LEVELS, true ) ? $level : 'draft' )['key'];
 				break;
 			case 'revoke':
-				Api::revoke();
+				Api::revoke( isset( $_POST['id'] ) ? sanitize_key( wp_unslash( (string) $_POST['id'] ) ) : '' );
 				$this->back( 'revoked' );
 				break;
 			case 'disconnect':
@@ -72,7 +73,7 @@ final class AdminPage {
 				$this->back( 'disconnected' );
 				break;
 			case 'discard':
-				$this->edits->set_draft( null );
+				Store::set_draft( null );
 				$this->back( 'discarded' );
 				break;
 			case 'test':
@@ -135,18 +136,6 @@ final class AdminPage {
 	/* ------------------------------------------------------------------ page */
 
 	/**
-	 * @return array<string, array{label: string, hint: string}>
-	 */
-	private static function levels(): array {
-		return array(
-			'read'  => array( 'label' => __( 'Read only', 'visual-editor' ), 'hint' => __( 'Looks at pages, templates and content (GET requests). Changes nothing.', 'visual-editor' ) ),
-			'draft' => array( 'label' => __( 'Propose changes — I approve them (recommended)', 'visual-editor' ), 'hint' => __( 'Editor changes (styles, text, SEO) wait as a draft until you review and save them in the visual editor.', 'visual-editor' ) ),
-			'live'  => array( 'label' => __( 'Edit live', 'visual-editor' ), 'hint' => __( 'Editor changes are published at once; each keeps a version you can restore.', 'visual-editor' ) ),
-			'full'  => array( 'label' => __( 'Full access — everything an administrator can do', 'visual-editor' ), 'hint' => __( 'Also content, media, menus, settings, users, plugins and WooCommerce through the REST API, acting as you. Deleting and user changes may not be undoable. Only for an assistant you trust.', 'visual-editor' ) ),
-		);
-	}
-
-	/**
 	 * Setup commands for each AI tool.
 	 *
 	 * @return array<string, array{label: string, text: string}>
@@ -182,9 +171,9 @@ final class AdminPage {
 	public function render(): void {
 		$s        = Api::settings();
 		$status   = Api::status();
-		$levels   = self::levels();
-		$draft    = $this->edits->draft();
-		$pending  = null === $draft ? 0 : Mcp::difference( $this->edits->get(), $draft );
+		$levels   = Api::level_labels();
+		$draft    = Store::draft();
+		$pending  = null === $draft ? 0 : Store::difference( Store::live(), $draft );
 		$key      = '' !== $this->new_key ? $this->new_key : 'YOUR_API_KEY';
 		$notices  = array(
 			'saved'     => __( 'Settings saved.', 'visual-editor' ),
@@ -226,41 +215,50 @@ final class AdminPage {
 	<?php endif; ?>
 
 	<div class="sve-card">
-		<h2>1 · <?php esc_html_e( 'API key', 'visual-editor' ); ?></h2>
+		<h2>1 · <?php esc_html_e( 'API keys and access', 'visual-editor' ); ?></h2>
 		<?php if ( '' !== $this->new_key ) : ?>
 			<div class="notice notice-warning inline"><p><strong><?php esc_html_e( 'Copy the key now — it is shown only once.', 'visual-editor' ); ?></strong></p>
 				<pre id="sve-new-key"><?php echo esc_html( $this->new_key ); ?></pre>
 				<p><button type="button" class="button button-primary" data-sve-copy="sve-new-key"><?php esc_html_e( 'Copy key', 'visual-editor' ); ?></button></p></div>
 		<?php endif; ?>
-		<?php if ( $status['hasKey'] ) : ?>
-			<p><?php echo esc_html( sprintf( /* translators: 1: key ending, 2: created, 3: last used, 4: calls */ __( 'Key %1$s · created %2$s · last used %3$s · %4$d calls', 'visual-editor' ), $status['keyHint'], $time( $status['created'] ), $time( $status['lastUsed'] ), $status['calls'] ) ); ?></p>
-		<?php else : ?>
-			<p><?php esc_html_e( 'No key yet.', 'visual-editor' ); ?></p>
-		<?php endif; ?>
 		<form method="post">
 			<?php wp_nonce_field( 'sve_ai' ); ?>
-			<button class="button button-primary" name="sve_do" value="create"><?php echo esc_html( $status['hasKey'] ? __( 'Create a new key (replaces the old one)', 'visual-editor' ) : __( 'Create API key', 'visual-editor' ) ); ?></button>
-			<?php if ( $status['hasKey'] ) : ?>
-				<button class="button" name="sve_do" value="revoke" onclick="return confirm('<?php echo esc_js( __( 'Revoke the key? Every AI tool using it stops working immediately.', 'visual-editor' ) ); ?>')"><?php esc_html_e( 'Revoke key', 'visual-editor' ); ?></button>
-			<?php endif; ?>
-		</form>
-		<p class="description"><?php esc_html_e( 'The AI acts as the administrator who creates the key. If that user stops being an administrator, the key stops working.', 'visual-editor' ); ?></p>
-	</div>
-
-	<div class="sve-card">
-		<h2>2 · <?php esc_html_e( 'What the AI may do, and what this site is', 'visual-editor' ); ?></h2>
-		<form method="post">
-			<?php wp_nonce_field( 'sve_ai' ); ?>
+			<input type="hidden" name="id" value="">
 			<p><label><input type="checkbox" name="enabled" value="1" <?php checked( $s['enabled'] ); ?>> <strong><?php esc_html_e( 'AI access switched on', 'visual-editor' ); ?></strong></label></p>
-			<?php foreach ( $levels as $value => $level ) : ?>
-				<label class="sve-radio"><input type="radio" name="level" value="<?php echo esc_attr( $value ); ?>" <?php checked( $s['level'], $value ); ?>> <strong><?php echo esc_html( $level['label'] ); ?></strong><small><?php echo esc_html( $level['hint'] ); ?></small></label>
-			<?php endforeach; ?>
+			<?php if ( array() === $status['keys'] ) : ?>
+				<p><?php esc_html_e( 'No key yet.', 'visual-editor' ); ?></p>
+			<?php else : ?>
+				<table class="widefat striped"><thead><tr><th><?php esc_html_e( 'Key', 'visual-editor' ); ?></th><th><?php esc_html_e( 'May', 'visual-editor' ); ?></th><th><?php esc_html_e( 'Acts as', 'visual-editor' ); ?></th><th><?php esc_html_e( 'Last used · calls', 'visual-editor' ); ?></th><th></th></tr></thead><tbody>
+				<?php foreach ( $status['keys'] as $key ) : ?>
+					<tr>
+						<td><strong><?php echo esc_html( $key['label'] ); ?></strong> <code><?php echo esc_html( $key['hint'] ); ?></code></td>
+						<td><select name="levels[<?php echo esc_attr( $key['id'] ); ?>]">
+							<?php foreach ( $levels as $value => $label ) : ?>
+								<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $key['level'], $value ); ?>><?php echo esc_html( $label ); ?></option>
+							<?php endforeach; ?>
+						</select></td>
+						<td><?php echo esc_html( $key['user'] ); ?></td>
+						<td><?php echo esc_html( $time( (int) $key['lastUsed'] ) . ' · ' . (int) $key['calls'] ); ?></td>
+						<td><button class="button" name="sve_do" value="revoke" onclick="this.form.id.value='<?php echo esc_js( $key['id'] ); ?>';return confirm('<?php echo esc_js( __( 'Revoke the key? Every AI tool using it stops working immediately.', 'visual-editor' ) ); ?>')"><?php esc_html_e( 'Revoke', 'visual-editor' ); ?></button></td>
+					</tr>
+				<?php endforeach; ?>
+				</tbody></table>
+			<?php endif; ?>
 			<p><label for="sve-about"><strong><?php esc_html_e( 'Describe this site to the AI', 'visual-editor' ); ?></strong></label><br>
 				<textarea id="sve-about" name="about" rows="3" maxlength="500" class="large-text" placeholder="<?php esc_attr_e( 'e.g. Tour booking shop for Phuket, Persian-speaking customers, WooCommerce.', 'visual-editor' ); ?>"><?php echo esc_textarea( $s['about'] ); ?></textarea><br>
 				<span class="description"><?php esc_html_e( 'The AI sees this when it connects. With several sites connected, it is how it tells them apart.', 'visual-editor' ); ?></span></p>
 			<p><button class="button button-primary" name="sve_do" value="save"><?php esc_html_e( 'Save settings', 'visual-editor' ); ?></button></p>
+			<hr>
+			<p><input type="text" name="label" placeholder="<?php esc_attr_e( 'Key name (e.g. Claude Code)', 'visual-editor' ); ?>" maxlength="60">
+				<select name="level">
+					<?php foreach ( $levels as $value => $label ) : ?>
+						<option value="<?php echo esc_attr( $value ); ?>" <?php selected( 'draft', $value ); ?>><?php echo esc_html( $label ); ?></option>
+					<?php endforeach; ?>
+				</select>
+				<button class="button button-primary" name="sve_do" value="create"><?php esc_html_e( 'Create API key', 'visual-editor' ); ?></button></p>
 		</form>
-		<p class="description"><?php echo esc_html( sprintf( /* translators: 1: reads per minute, 2: changes per minute, 3: changes per day */ __( 'Limits: %1$d reads and %2$d changes per minute, %3$d changes per day. Wrong keys are blocked after a few tries.', 'visual-editor' ), $status['limits']['readsPerMinute'], $status['limits']['writesPerMinute'], $status['limits']['writesPerDay'] ) ); ?></p>
+		<p class="description"><?php esc_html_e( 'A key acts as the administrator who creates it; if that user stops being an administrator, the key stops working.', 'visual-editor' ); ?></p>
+		<p class="description"><?php echo esc_html( sprintf( /* translators: 1: reads per minute, 2: changes per minute, 3: changes per day */ __( 'Limits per key: %1$d reads and %2$d changes per minute, %3$d changes per day. Wrong keys are blocked after a few tries.', 'visual-editor' ), $status['limits']['readsPerMinute'], $status['limits']['writesPerMinute'], $status['limits']['writesPerDay'] ) ); ?></p>
 	</div>
 
 	<div class="sve-card">
@@ -300,22 +298,22 @@ final class AdminPage {
 				<button class="button" name="sve_do" value="disconnect" onclick="return confirm('<?php echo esc_js( __( 'Disconnect every app? They have to be approved again.', 'visual-editor' ) ); ?>')"><?php esc_html_e( 'Disconnect all apps', 'visual-editor' ); ?></button>
 			</form>
 		<?php endif; ?>
-		<p class="description"><?php esc_html_e( 'An app gets the permission level chosen above and acts as the administrator who approved it. Access tokens last an hour and refresh by themselves; switching AI access off stops them at once.', 'visual-editor' ); ?></p>
+		<p class="description"><?php esc_html_e( 'You choose the permission level on the consent page; the app acts as the administrator who approved it. Access tokens last an hour and refresh by themselves; switching AI access off stops them at once.', 'visual-editor' ); ?></p>
 	</div>
 
 	<div class="sve-card">
 		<h2>5 · <?php esc_html_e( 'What the AI changed', 'visual-editor' ); ?></h2>
-		<?php $log = array_slice( array_reverse( Api::log_entries() ), 0, 50 ); ?>
+		<?php $log = array_slice( array_reverse( Store::activity() ), 0, 50 ); ?>
 		<?php if ( array() === $log ) : ?>
 			<p><?php esc_html_e( 'Nothing yet.', 'visual-editor' ); ?></p>
 		<?php else : ?>
 			<table class="widefat striped"><tbody>
 				<?php foreach ( $log as $entry ) : ?>
-					<tr><td style="white-space:nowrap;width:1%"><?php echo esc_html( wp_date( 'Y-m-d H:i:s', (int) $entry['t'] ) ); ?></td><td><code style="word-break:break-all"><?php echo esc_html( (string) $entry['what'] ); ?></code></td></tr>
+					<tr><td style="white-space:nowrap;width:1%"><?php echo esc_html( wp_date( 'Y-m-d H:i:s', (int) $entry['time'] ) ); ?></td><td><?php echo esc_html( (string) $entry['actor'] ); ?></td><td><code style="word-break:break-all"><?php echo esc_html( (string) $entry['summary'] ); ?></code></td></tr>
 				<?php endforeach; ?>
 			</tbody></table>
 		<?php endif; ?>
-		<p class="description"><?php esc_html_e( 'Earlier versions of the editor document can be restored in the visual editor (✦ dialog). Posts keep WordPress revisions.', 'visual-editor' ); ?></p>
+		<p class="description"><?php esc_html_e( 'Earlier versions of the editor document can be restored in the visual editor (history panel). Posts keep WordPress revisions.', 'visual-editor' ); ?></p>
 	</div>
 
 	<script>

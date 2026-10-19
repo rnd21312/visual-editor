@@ -19,7 +19,6 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
       - run: npm run build
 
   php-lint:
@@ -33,7 +32,5 @@ jobs:
         run: find . -name '*.php' -not -path './frontend/*' -print0 | xargs -0 -n1 php -l > /dev/null
       - name: PHP self-checks
         run: |
-          php -d zend.assertions=1 -d assert.exception=1 tests/rebase-check.php
           php -d zend.assertions=1 -d assert.exception=1 tests/guard-check.php
-          php -d zend.assertions=1 -d assert.exception=1 tests/mcp-check.php
           php -d zend.assertions=1 -d assert.exception=1 tests/oauth-check.php

@@ -1,7 +1,8 @@
 <?php
 /**
- * PHP twin of the editor's compileEdit() (frontend/src/lib/visualCss.ts): turns an edit into the CSS the
- * public site prints. Edits created through the API need it because no editor is there to compile them.
+ * Turns an edit (selector + per-device styles, states, visibility and free CSS) into the CSS the public site
+ * prints. The editor has a TypeScript twin (frontend/src/shared/compile.ts) for its live preview; the server
+ * compiles again on save so stored CSS never depends on what a client sent.
  *
  * @package VisualEditor
  */
@@ -14,42 +15,81 @@ defined( 'ABSPATH' ) || exit;
 
 final class Compiler {
 
-	private const MEDIA = array(
-		'base'   => '',
-		'tablet' => '(max-width: 1023px)',
-		'mobile' => '(max-width: 767px)',
+	/** @var array{tablet: int, mobile: int} */
+	private static array $bp = array(
+		'tablet' => 1023,
+		'mobile' => 767,
 	);
 
-	private const HIDE = array(
-		'desktop' => '(min-width: 1024px)',
-		'tablet'  => '(min-width: 768px) and (max-width: 1023px)',
-		'mobile'  => '(max-width: 767px)',
+	/** Pseudo-classes appended to every selector of the list; pseudo-elements use "::". */
+	private const STATES = array(
+		'hover'         => ':hover',
+		'focus'         => ':focus',
+		'active'        => ':active',
+		'focus-visible' => ':focus-visible',
+		'focus-within'  => ':focus-within',
+		'first-child'   => ':first-child',
+		'last-child'    => ':last-child',
+		'before'        => '::before',
+		'after'         => '::after',
+		'placeholder'   => '::placeholder',
 	);
+
+	/**
+	 * @param array<string, int> $bp Breakpoints (max-width of tablet and mobile).
+	 */
+	public static function set_breakpoints( array $bp ): void {
+		self::$bp = array(
+			'tablet' => (int) ( $bp['tablet'] ?? 1023 ),
+			'mobile' => (int) ( $bp['mobile'] ?? 767 ),
+		);
+	}
+
+	/**
+	 * @return array<string, string> device => media query ('' for base)
+	 */
+	public static function media(): array {
+		return array(
+			'base'   => '',
+			'tablet' => '(max-width: ' . self::$bp['tablet'] . 'px)',
+			'mobile' => '(max-width: ' . self::$bp['mobile'] . 'px)',
+		);
+	}
 
 	/**
 	 * @param array<string, mixed> $edit Edit with sel, styles, states, hide and css.
 	 */
 	public static function compile( array $edit ): string {
-		$sel = (string) $edit['sel'];
-		$out = array();
+		$sel   = (string) $edit['sel'];
+		$parts = self::split( $sel );
+		$out   = array();
 
-		foreach ( self::MEDIA as $device => $media ) {
+		foreach ( self::media() as $device => $media ) {
 			$body = self::declarations( (array) ( $edit['styles'][ $device ] ?? array() ) );
 			if ( '' !== $body ) {
 				$out[] = self::wrap( $media, $sel . '{' . $body . '}' );
 			}
 		}
 
-		foreach ( array( 'hover', 'focus', 'active' ) as $state ) {
-			foreach ( self::MEDIA as $device => $media ) {
-				$body = self::declarations( (array) ( $edit['states'][ $state ][ $device ] ?? array() ) );
+		foreach ( self::STATES as $state => $suffix ) {
+			foreach ( self::media() as $device => $media ) {
+				$styles = (array) ( $edit['states'][ $state ][ $device ] ?? array() );
+				if ( in_array( $state, array( 'before', 'after' ), true ) && array() !== $styles && ! isset( $styles['content'] ) ) {
+					$styles = array( 'content' => '""' ) + $styles;
+				}
+				$body = self::declarations( $styles );
 				if ( '' !== $body ) {
-					$out[] = self::wrap( $media, self::suffix( $sel, ':' . $state ) . '{' . $body . '}' );
+					$out[] = self::wrap( $media, implode( ',', array_map( static fn ( string $s ): string => $s . $suffix, $parts ) ) . '{' . $body . '}' );
 				}
 			}
 		}
 
-		foreach ( self::HIDE as $key => $media ) {
+		$hide = array(
+			'desktop' => '(min-width: ' . ( self::$bp['tablet'] + 1 ) . 'px)',
+			'tablet'  => '(min-width: ' . ( self::$bp['mobile'] + 1 ) . 'px) and (max-width: ' . self::$bp['tablet'] . 'px)',
+			'mobile'  => '(max-width: ' . self::$bp['mobile'] . 'px)',
+		);
+		foreach ( $hide as $key => $media ) {
 			if ( ! empty( $edit['hide'][ $key ] ) ) {
 				$out[] = '@media ' . $media . '{' . $sel . '{display:none !important}}';
 			}
@@ -57,52 +97,65 @@ final class Compiler {
 
 		$custom = trim( (string) ( $edit['css'] ?? '' ) );
 		if ( '' !== $custom ) {
-			// The word "selector" only when it stands alone: not .selector-list, [data-selector], --selector-gap or "selector".
-			$self  = count( self::split( $sel ) ) > 1 ? ':is(' . $sel . ')' : $sel;
-			$out[] = (string) preg_replace_callback( '/(?<![\w\-.#\[:"\'])selector(?![\w\-\]"\'])/', static fn (): string => $self, $custom );
+			$out[] = self::custom( $custom, $sel );
 		}
 
 		return implode( "\n", $out );
 	}
 
 	/**
-	 * The selectors of a list, split on top-level commas (not those inside (), [] or quotes).
+	 * Free CSS of an edit: the word "selector" (or a leading "&") stands for the edit's selector. Plain
+	 * declarations without braces are wrapped in a rule for the selector.
+	 */
+	public static function custom( string $css, string $sel ): string {
+		if ( ! str_contains( $css, '{' ) ) {
+			return $sel . '{' . $css . '}';
+		}
+		// A list ("a, .b") must stay one unit inside "selector > i": wrap it in :is().
+		$self = count( self::split( $sel ) ) > 1 ? ':is(' . $sel . ')' : $sel;
+		$css  = (string) preg_replace_callback( '/(?<![\w\-.#])selector(?![\w\-])/', static fn (): string => $self, $css );
+
+		return (string) preg_replace( '/(^|[},]\s*)&/', '$1' . str_replace( '$', '\\$', $self ), $css );
+	}
+
+	/**
+	 * Splits a selector list at top-level commas (not inside brackets, parentheses or strings).
 	 *
-	 * @return array<int, string>
+	 * @return string[]
 	 */
 	public static function split( string $sel ): array {
 		$parts = array();
 		$depth = 0;
 		$quote = '';
-		$start = 0;
+		$buf   = '';
 		$len   = strlen( $sel );
 		for ( $i = 0; $i < $len; $i++ ) {
 			$c = $sel[ $i ];
 			if ( '' !== $quote ) {
-				if ( '\\' === $c ) {
-					++$i;
+				$buf .= $c;
+				if ( '\\' === $c && $i + 1 < $len ) {
+					$buf .= $sel[ ++$i ];
 				} elseif ( $c === $quote ) {
 					$quote = '';
 				}
-			} elseif ( '"' === $c || "'" === $c ) {
+				continue;
+			}
+			if ( '"' === $c || "'" === $c ) {
 				$quote = $c;
 			} elseif ( '(' === $c || '[' === $c ) {
 				++$depth;
 			} elseif ( ')' === $c || ']' === $c ) {
-				--$depth;
+				$depth = max( 0, $depth - 1 );
 			} elseif ( ',' === $c && 0 === $depth ) {
-				$parts[] = trim( substr( $sel, $start, $i - $start ) );
-				$start   = $i + 1;
+				$parts[] = trim( $buf );
+				$buf     = '';
+				continue;
 			}
+			$buf .= $c;
 		}
-		$parts[] = trim( substr( $sel, $start ) );
+		$parts[] = trim( $buf );
 
-		return array_values( array_filter( $parts, static fn ( string $part ): bool => '' !== $part ) );
-	}
-
-	/** Appends a pseudo-class to every selector of a list: "a, b" + ":hover" → "a:hover,b:hover". */
-	private static function suffix( string $sel, string $suffix ): string {
-		return implode( ',', array_map( static fn ( string $part ): string => $part . $suffix, self::split( $sel ) ) );
+		return array_values( array_filter( $parts, static fn ( string $p ): bool => '' !== $p ) );
 	}
 
 	/**

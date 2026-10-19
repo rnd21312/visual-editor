@@ -65,7 +65,7 @@ final class OAuth {
 	 * @param callable(array<string, mixed>): mixed $change Receives the state by reference.
 	 */
 	private static function mutate( callable $change ): mixed {
-		return VisualEdits::locked(
+		return Store::locked(
 			static function () use ( $change ): mixed {
 				$state  = self::load();
 				$result = $change( $state );
@@ -172,11 +172,11 @@ final class OAuth {
 	/**
 	 * A one-time authorization code for an approved request, valid for a minute.
 	 */
-	public static function create_code( string $client, int $user, string $uri, string $challenge ): string {
+	public static function create_code( string $client, int $user, string $uri, string $challenge, string $level = 'draft' ): string {
 		$code = bin2hex( random_bytes( 32 ) );
 		self::mutate(
-			static function ( array &$state ) use ( $code, $client, $user, $uri, $challenge ): void {
-				$state['codes'][ hash( 'sha256', $code ) ] = array( 'c' => $client, 'u' => $user, 'r' => $uri, 'p' => $challenge, 'e' => time() + self::CODE_TTL );
+			static function ( array &$state ) use ( $code, $client, $user, $uri, $challenge, $level ): void {
+				$state['codes'][ hash( 'sha256', $code ) ] = array( 'c' => $client, 'u' => $user, 'r' => $uri, 'p' => $challenge, 'l' => $level, 'e' => time() + self::CODE_TTL );
 			}
 		);
 
@@ -215,7 +215,7 @@ final class OAuth {
 					}
 					$state['clients'][ $rec['c'] ]['last_used'] = time();
 
-					return array( 'ok' => true, 'body' => self::issue( $state, $rec['c'], (int) $rec['u'] ) );
+					return array( 'ok' => true, 'body' => self::issue( $state, $rec['c'], (int) $rec['u'], self::level_of( $rec ) ) );
 				}
 			);
 		}
@@ -233,7 +233,7 @@ final class OAuth {
 					unset( $state['tokens'][ $hash ] ); // Rotated: the old one stops working.
 					$state['clients'][ $rec['c'] ]['last_used'] = time();
 
-					return array( 'ok' => true, 'body' => self::issue( $state, $rec['c'], (int) $rec['u'] ) );
+					return array( 'ok' => true, 'body' => self::issue( $state, $rec['c'], (int) $rec['u'], self::level_of( $rec ) ) );
 				}
 			);
 		}
@@ -242,15 +242,22 @@ final class OAuth {
 	}
 
 	/**
+	 * @param array<string, mixed> $rec Code or token record.
+	 */
+	private static function level_of( array $rec ): string {
+		return in_array( $rec['l'] ?? '', Api::LEVELS, true ) ? (string) $rec['l'] : 'draft';
+	}
+
+	/**
 	 * @param array<string, mixed> $state State (by reference).
 	 * @return array<string, mixed>
 	 */
-	private static function issue( array &$state, string $client, int $user ): array {
+	private static function issue( array &$state, string $client, int $user, string $level ): array {
 		$access  = 'sve_at_' . bin2hex( random_bytes( 32 ) );
 		$refresh = 'sve_rt_' . bin2hex( random_bytes( 32 ) );
 
-		$state['tokens'][ hash( 'sha256', $access ) ]  = array( 't' => 'a', 'c' => $client, 'u' => $user, 'e' => time() + self::ACCESS_TTL );
-		$state['tokens'][ hash( 'sha256', $refresh ) ] = array( 't' => 'r', 'c' => $client, 'u' => $user, 'e' => time() + self::REFRESH_TTL );
+		$state['tokens'][ hash( 'sha256', $access ) ]  = array( 't' => 'a', 'c' => $client, 'u' => $user, 'l' => $level, 'e' => time() + self::ACCESS_TTL );
+		$state['tokens'][ hash( 'sha256', $refresh ) ] = array( 't' => 'r', 'c' => $client, 'u' => $user, 'l' => $level, 'e' => time() + self::REFRESH_TTL );
 
 		return array( 'access_token' => $access, 'token_type' => 'Bearer', 'expires_in' => self::ACCESS_TTL, 'refresh_token' => $refresh, 'scope' => 'mcp' );
 	}
@@ -258,7 +265,7 @@ final class OAuth {
 	/**
 	 * Who an access token belongs to, or null when it is unknown, expired or its app was removed.
 	 *
-	 * @return array{u: int, c: string}|null
+	 * @return array{u: int, c: string, l: string}|null
 	 */
 	public static function grant( string $token ): ?array {
 		if ( ! str_starts_with( $token, 'sve_at_' ) ) {
@@ -270,7 +277,7 @@ final class OAuth {
 			return null;
 		}
 
-		return array( 'u' => (int) $rec['u'], 'c' => (string) $rec['c'] );
+		return array( 'u' => (int) $rec['u'], 'c' => (string) $rec['c'], 'l' => self::level_of( $rec ), 'name' => (string) $state['clients'][ $rec['c'] ]['name'] );
 	}
 
 	/** Disconnects every app: tokens, codes and registrations. */
@@ -440,6 +447,13 @@ final class OAuth {
 		exit;
 	}
 
+	/** The level the administrator picked on the consent page. */
+	private function chosen_level(): string {
+		$level = isset( $_POST['sve_level'] ) ? sanitize_key( wp_unslash( (string) $_POST['sve_level'] ) ) : 'draft'; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- checked by the caller.
+
+		return in_array( $level, Api::LEVELS, true ) ? $level : 'draft';
+	}
+
 	private function authorize(): never {
 		if ( ! Api::settings()['enabled'] ) {
 			$this->page( 'Not available', '<h1>AI access is switched off</h1><p>An administrator has to switch it on in the AI (MCP) settings first.</p>', 503 );
@@ -467,7 +481,7 @@ final class OAuth {
 		if ( 'POST' === ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
 			check_admin_referer( 'sve_oauth' );
 			if ( 'allow' === ( $_POST['sve_decision'] ?? '' ) && ! isset( $check['error'] ) ) { // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
-				$this->back( $check, array( 'code' => self::create_code( $check['client_id'], get_current_user_id(), $check['uri'], $check['challenge'] ) ) );
+				$this->back( $check, array( 'code' => self::create_code( $check['client_id'], get_current_user_id(), $check['uri'], $check['challenge'], $this->chosen_level() ) ) );
 			}
 			$this->back( $check, array( 'error' => $check['error'] ?? 'access_denied' ) );
 		}
@@ -475,13 +489,10 @@ final class OAuth {
 			$this->back( $check, array( 'error' => $check['error'] ) );
 		}
 
-		$levels = array(
-			'read'  => __( 'look at the site (read only)', 'visual-editor' ),
-			'draft' => __( 'propose changes that you approve before they go live', 'visual-editor' ),
-			'live'  => __( 'edit the site with the visual editor, live', 'visual-editor' ),
-			'full'  => __( 'do everything an administrator can do, including content, users and plugins', 'visual-editor' ),
-		);
-		$level  = Api::settings()['level'];
+		$options = '';
+		foreach ( Api::level_labels() as $value => $label ) {
+			$options .= '<option value="' . esc_attr( $value ) . '"' . selected( 'draft', $value, false ) . '>' . esc_html( $label ) . '</option>';
+		}
 		$hidden = '';
 		foreach ( $q as $name => $value ) {
 			$hidden .= '<input type="hidden" name="' . esc_attr( $name ) . '" value="' . esc_attr( $value ) . '">';
@@ -492,7 +503,7 @@ final class OAuth {
 			__( 'Connect an AI app', 'visual-editor' ),
 			'<h1>' . esc_html( sprintf( /* translators: %s: app name */ __( 'Connect “%s”?', 'visual-editor' ), $check['client']['name'] ) ) . '</h1>'
 			. '<p>' . esc_html( sprintf( /* translators: 1: site name, 2: user name */ __( 'This app is asking to work on %1$s as %2$s.', 'visual-editor' ), get_bloginfo( 'name' ), $user->display_name ) ) . '</p>'
-			. '<p>' . esc_html( sprintf( /* translators: %s: what the AI may do */ __( 'It will be able to: %s.', 'visual-editor' ), $levels[ $level ] ?? $levels['draft'] ) ) . '</p>'
+			. '<p><label for="sve-level">' . esc_html__( 'It will be able to:', 'visual-editor' ) . '</label><br><select id="sve-level" name="sve_level" style="font:inherit;max-width:100%">' . $options . '</select></p>'
 			. '<p class="s">' . esc_html( sprintf( /* translators: %s: address */ __( 'After you allow it, you are sent back to %s. You can disconnect apps any time in the AI (MCP) settings.', 'visual-editor' ), (string) wp_parse_url( $check['uri'], PHP_URL_HOST ) ) ) . '</p>'
 			. '<form method="post">' . $hidden . wp_nonce_field( 'sve_oauth', '_wpnonce', true, false )
 			. '<button class="p" name="sve_decision" value="allow">' . esc_html__( 'Allow', 'visual-editor' ) . '</button>'

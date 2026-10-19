@@ -1,8 +1,14 @@
 <?php
 /**
- * Key, permissions and request limits of the AI API. The key is shown once and only a hash is stored. Every
- * call is rate limited per minute and per day, bad keys are throttled per IP, and what the key may do is
- * chosen by an administrator: read only, propose changes for approval (default), or edit live.
+ * Keys, permission levels and request limits of the AI (MCP) API.
+ *
+ * Several keys can exist, each with its own level:
+ *  - read  : look only.
+ *  - draft : propose changes; they wait in the editor until a person publishes them (default).
+ *  - live  : change the site at once (every change keeps a revision); markup is filtered, no scripts.
+ *  - admin : full control, like the administrator who created the key: scripts, plugins, settings,
+ *            any REST route of WordPress and its plugins.
+ * A key acts as the WordPress user who created it. Only a hash of the key is stored.
  *
  * @package VisualEditor
  */
@@ -20,57 +26,69 @@ final class Api {
 
 	public const OPTION = 'sve_api';
 
-	/** Usage stats live apart from the key: touch() runs on every call and must never write the hash back. */
-	public const USAGE = 'sve_api_usage';
-
-	public const LOG = 'sve_api_log';
+	public const LEVELS = array( 'read', 'draft', 'live', 'admin' );
 
 	/** Token the settings page's connection test sends: never a valid key. */
 	public const PROBE = 'sve_probe';
 
-	/** Administrator an OAuth token acts as, for the request being served (0 = the key's own user). */
-	private static int $acting = 0;
+	public const READS_PER_MINUTE = 240;
 
-	public const READS_PER_MINUTE = 120;
+	public const WRITES_PER_MINUTE = 60;
 
-	public const WRITES_PER_MINUTE = 30;
+	public const WRITES_PER_DAY = 3000;
 
-	public const WRITES_PER_DAY = 600;
+	public const MAX_BODY = 8388608;
 
-	public const MAX_BODY = 262144;
+	private const FAILS_PER_WINDOW = 30;
 
-	private const FAILS_PER_WINDOW = 20;
+	/** @var array<string, mixed>|null Key of the request being served. */
+	private static ?array $current = null;
 
 	/**
-	 * @return array{enabled: bool, level: string, hash: string, hint: string, about: string, created: int, last_used: int, calls: int}
+	 * @return array{enabled: bool, keys: array<int, array<string, mixed>>}
 	 */
 	public static function settings(): array {
 		$saved = get_option( self::OPTION, array() );
-		$usage = get_option( self::USAGE, array() );
-		$saved = array_merge( is_array( $saved ) ? $saved : array(), is_array( $usage ) ? $usage : array() );
+		$saved = is_array( $saved ) ? $saved : array();
+
+		$keys = array();
+		foreach ( (array) ( $saved['keys'] ?? array() ) as $key ) {
+			if ( is_array( $key ) && ! empty( $key['hash'] ) ) {
+				$keys[] = self::key_shape( $key );
+			}
+		}
+		// v1 stored a single key at the top level.
+		if ( array() === $keys && ! empty( $saved['hash'] ) ) {
+			$keys[] = self::key_shape(
+				array(
+					'id'    => 'k1',
+					'label' => 'AI key',
+					'hash'  => $saved['hash'],
+					'hint'  => $saved['hint'] ?? '',
+					'level' => $saved['level'] ?? 'draft',
+				)
+			);
+		}
 
 		return array(
-			'enabled'   => ! empty( $saved['enabled'] ),
-			'level'     => in_array( $saved['level'] ?? '', array( 'read', 'draft', 'live', 'full' ), true ) ? (string) $saved['level'] : 'draft',
-			'hash'      => (string) ( $saved['hash'] ?? '' ),
-			'hint'      => (string) ( $saved['hint'] ?? '' ),
-			'about'     => (string) ( $saved['about'] ?? '' ),
-			'user'      => (int) ( $saved['user'] ?? 0 ),
-			'created'   => (int) ( $saved['created'] ?? 0 ),
-			'last_used' => (int) ( $saved['last_used'] ?? 0 ),
-			'calls'     => (int) ( $saved['calls'] ?? 0 ),
+			'enabled' => ! empty( $saved['enabled'] ),
+			'about'   => (string) ( $saved['about'] ?? '' ),
+			'keys'    => $keys,
 		);
 	}
 
 	/**
-	 * @param array<string, mixed> $change Fields to overwrite.
+	 * What each level lets an AI do, for the settings page and the OAuth consent page.
+	 *
+	 * @return array<string, string>
 	 */
-	private static function write( array $change ): void {
-		update_option( self::OPTION, array_diff_key( array_merge( self::settings(), $change ), array_flip( array( 'last_used', 'calls' ) ) ), false );
-	}
-
-	public static function endpoint(): string {
-		return esc_url_raw( rest_url( 'sve/v1/mcp' ) );
+	public static function level_labels(): array {
+		return array(
+			'read'  => __( 'Look only (read)', 'visual-editor' ),
+			'draft' => __( 'Propose changes that you approve before they go live (draft)', 'visual-editor' ),
+			'live'  => __( 'Edit the site live (revisions are kept)', 'visual-editor' ),
+			'admin' => __( 'Full control: everything an administrator can do, including content, users and plugins', 'visual-editor' ),
+		);
 	}
 
 	/**
@@ -83,13 +101,48 @@ final class Api {
 		return substr( 'wp-' . ( '' !== $slug ? $slug : 'site' ), 0, 48 );
 	}
 
-	/** Host (and folder) of this site, repeated in every result so the AI sees which site a change landed on. */
+	/** Host (and folder) of this site, repeated in results so the AI sees which site a change landed on. */
 	public static function site(): string {
 		return (string) wp_parse_url( home_url(), PHP_URL_HOST ) . rtrim( (string) wp_parse_url( home_url(), PHP_URL_PATH ), '/' );
 	}
 
+	public static function set_about( string $about ): void {
+		$s          = self::settings();
+		$s['about'] = substr( sanitize_textarea_field( $about ), 0, 500 );
+		self::write( $s );
+	}
+
 	/**
-	 * What the settings screen may show (never the key itself).
+	 * @param array<string, mixed> $key Stored key.
+	 * @return array<string, mixed>
+	 */
+	private static function key_shape( array $key ): array {
+		return array(
+			'id'        => (string) ( $key['id'] ?? Sanitizer::new_id() ),
+			'label'     => (string) ( $key['label'] ?? 'AI key' ),
+			'hash'      => (string) $key['hash'],
+			'hint'      => (string) ( $key['hint'] ?? '' ),
+			'level'     => in_array( $key['level'] ?? '', self::LEVELS, true ) ? (string) $key['level'] : 'draft',
+			'user'      => (int) ( $key['user'] ?? 0 ),
+			'created'   => (int) ( $key['created'] ?? 0 ),
+			'last_used' => (int) ( $key['last_used'] ?? 0 ),
+			'calls'     => (int) ( $key['calls'] ?? 0 ),
+		);
+	}
+
+	/**
+	 * @param array{enabled: bool, about: string, keys: array<int, array<string, mixed>>} $settings Settings.
+	 */
+	private static function write( array $settings ): void {
+		update_option( self::OPTION, $settings, false );
+	}
+
+	public static function endpoint(): string {
+		return esc_url_raw( rest_url( 'sve/v1/mcp' ) );
+	}
+
+	/**
+	 * What the settings screen may show (never key hashes).
 	 *
 	 * @return array<string, mixed>
 	 */
@@ -98,53 +151,97 @@ final class Api {
 
 		return array(
 			'enabled'  => $s['enabled'],
-			'level'    => $s['level'],
-			'hasKey'   => '' !== $s['hash'],
-			'keyHint'  => $s['hint'],
+			'endpoint' => self::endpoint(),
 			'about'    => $s['about'],
 			'serverName' => self::server_name(),
-			'created'  => $s['created'],
-			'lastUsed' => $s['last_used'],
-			'calls'    => $s['calls'],
-			'endpoint' => self::endpoint(),
+			'apps'     => OAuth::summary(),
+			'keys'     => array_map(
+				static function ( array $key ): array {
+					$user = get_userdata( $key['user'] );
+
+					return array(
+						'id'       => $key['id'],
+						'label'    => $key['label'],
+						'hint'     => $key['hint'],
+						'level'    => $key['level'],
+						'user'     => $user ? $user->display_name : '',
+						'created'  => $key['created'],
+						'lastUsed' => $key['last_used'],
+						'calls'    => $key['calls'],
+					);
+				},
+				$s['keys']
+			),
 			'limits'   => array(
 				'readsPerMinute'  => self::READS_PER_MINUTE,
 				'writesPerMinute' => self::WRITES_PER_MINUTE,
 				'writesPerDay'    => self::WRITES_PER_DAY,
 			),
+			'live'     => LiveBridge::status(),
 		);
 	}
 
-	public static function configure( bool $enabled, string $level, ?string $about = null ): void {
-		self::write(
-			array(
-				'enabled' => $enabled,
-				'level'   => in_array( $level, array( 'read', 'draft', 'live', 'full' ), true ) ? $level : 'draft',
-			) + ( null === $about ? array() : array( 'about' => substr( sanitize_textarea_field( $about ), 0, 500 ) ) )
-		);
+	public static function set_enabled( bool $enabled ): void {
+		$s            = self::settings();
+		$s['enabled'] = $enabled;
+		self::write( $s );
 	}
 
 	/**
-	 * Creates a new key (replacing any old one). The plain key is returned once and never stored.
+	 * Changes the level or label of a key.
 	 */
-	public static function create_key(): string {
-		$key = 'sve_' . bin2hex( random_bytes( 24 ) );
-		self::write(
-			array(
-				'enabled' => true,
-				'hash'    => self::hash( $key ),
-				'hint'    => '…' . substr( $key, -4 ),
-				'created' => time(),
-				'user'    => get_current_user_id(), // The AI acts as the administrator who made the key.
-			)
-		);
-		delete_option( self::USAGE );
+	public static function update_key( string $id, ?string $level, ?string $label ): bool {
+		$s = self::settings();
+		foreach ( $s['keys'] as $i => $key ) {
+			if ( $key['id'] === $id ) {
+				if ( null !== $level && in_array( $level, self::LEVELS, true ) ) {
+					$s['keys'][ $i ]['level'] = $level;
+				}
+				if ( null !== $label && '' !== trim( $label ) ) {
+					$s['keys'][ $i ]['label'] = mb_substr( sanitize_text_field( $label ), 0, 60 );
+				}
+				self::write( $s );
 
-		return $key;
+				return true;
+			}
+		}
+
+		return false;
 	}
 
-	public static function revoke(): void {
-		self::write( array( 'hash' => '', 'hint' => '', 'enabled' => false ) );
+	/**
+	 * Creates a key for the current user. The plain key is returned once and never stored.
+	 *
+	 * @return array{key: string, id: string}
+	 */
+	public static function create_key( string $label, string $level ): array {
+		$plain     = 'sve_' . bin2hex( random_bytes( 24 ) );
+		$s         = self::settings();
+		$id        = Sanitizer::new_id();
+		$s['keys'][] = self::key_shape(
+			array(
+				'id'      => $id,
+				'label'   => '' !== trim( $label ) ? mb_substr( sanitize_text_field( $label ), 0, 60 ) : 'AI key',
+				'hash'    => self::hash( $plain ),
+				'hint'    => '…' . substr( $plain, -4 ),
+				'level'   => $level,
+				'user'    => get_current_user_id(),
+				'created' => time(),
+			)
+		);
+		$s['enabled'] = true;
+		self::write( $s );
+
+		return array(
+			'key' => $plain,
+			'id'  => $id,
+		);
+	}
+
+	public static function revoke( string $id ): void {
+		$s         = self::settings();
+		$s['keys'] = array_values( array_filter( $s['keys'], static fn ( array $key ): bool => $key['id'] !== $id ) );
+		self::write( $s );
 	}
 
 	private static function hash( string $key ): string {
@@ -153,9 +250,7 @@ final class Api {
 
 	private static function ip(): string {
 		// Behind a CDN or proxy REMOTE_ADDR is the proxy for everyone: return the real client address here.
-		$ip = (string) apply_filters( 'sve_client_ip', $_SERVER['REMOTE_ADDR'] ?? 'unknown' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
-
-		return substr( $ip, 0, 64 );
+		return substr( (string) apply_filters( 'sve_client_ip', $_SERVER['REMOTE_ADDR'] ?? 'unknown' ), 0, 64 ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 	}
 
 	private static function limited( string $message, int $retry ): WP_Error {
@@ -163,38 +258,65 @@ final class Api {
 	}
 
 	/**
-	 * Checks the key of a request. Wrong keys are throttled per IP so the key cannot be guessed.
+	 * The key a request carries: "Authorization: Bearer …" or "X-SVE-Key: …" (some hosts strip Authorization).
+	 */
+	private static function token( WP_REST_Request $request ): string {
+		$header = (string) $request->get_header( 'authorization' );
+		if ( '' === $header ) {
+			$header = (string) ( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+		}
+		if ( 0 === stripos( $header, 'bearer ' ) ) {
+			return trim( substr( $header, 7 ) );
+		}
+
+		return trim( (string) $request->get_header( 'x-sve-key' ) );
+	}
+
+	/**
+	 * Checks the key of a request and, when valid, acts as the user who created it.
+	 *
+	 * A valid key is never blocked by the failed-attempt counter (otherwise anyone sharing an IP — a proxy, a CDN —
+	 * could lock the real client out); wrong keys are throttled per IP.
 	 *
 	 * @return true|WP_Error
 	 */
 	public static function authenticate( WP_REST_Request $request ) {
 		$settings = self::settings();
-		if ( ! $settings['enabled'] ) {
-			return new WP_Error( 'sve_api_disabled', 'The AI API is switched off.', array( 'status' => 403 ) );
+		if ( ! $settings['enabled'] || array() === $settings['keys'] ) {
+			return new WP_Error( 'sve_api_disabled', 'The AI API is switched off. Turn it on in the visual editor (Settings → AI access).', array( 'status' => 403 ) );
 		}
 
-		$header = (string) $request->get_header( 'authorization' );
-		if ( '' === $header && isset( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ) ) { // Apache with rewrite rules moves it here.
-			$header = (string) wp_unslash( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
-		}
-		$token  = 0 === stripos( $header, 'bearer ' ) ? trim( substr( $header, 7 ) ) : trim( (string) $request->get_header( 'x-sve-key' ) );
-
-		// The right key always gets in: the key is 192 random bits, and a lockout keyed on the IP must not
-		// shut out the real client when someone else behind the same address guesses wrong.
-		if ( '' !== $token && '' !== $settings['hash'] && hash_equals( $settings['hash'], self::hash( $token ) ) ) {
-			if ( self::acting_user() <= 0 ) {
-				return new WP_Error( 'sve_no_admin', 'The key belongs to a user who is no longer an administrator.', array( 'status' => 403 ) );
+		$token = self::token( $request );
+		if ( '' !== $token ) {
+			$hash = self::hash( $token );
+			foreach ( $settings['keys'] as $key ) {
+				if ( hash_equals( $key['hash'], $hash ) ) {
+					self::$current = $key;
+					$user          = $key['user'] > 0 ? get_userdata( $key['user'] ) : false;
+					if ( ! $user ) {
+						return new WP_Error( 'sve_key_user', 'The user who created this key no longer exists. Create a new key.', array( 'status' => 403 ) );
+					}
+					wp_set_current_user( $user->ID );
+					if ( 'admin' !== $key['level'] ) {
+						// Whatever the user may do, markup written through a non-admin key is filtered.
+						kses_init_filters();
+					}
+					return true;
+				}
 			}
-
-			return true;
 		}
 
-		// An OAuth access token (web AI apps): it acts as the administrator who approved the app.
-		$grant = OAuth::grant( $token );
+		// An OAuth access token (web AI apps such as Claude.ai): it acts as the administrator who approved the app.
+		$grant = '' !== $token ? OAuth::grant( $token ) : null;
 		if ( null !== $grant ) {
-			self::$acting = $grant['u'];
-			if ( self::acting_user() <= 0 ) {
-				return new WP_Error( 'sve_no_admin', 'The user who connected this app is no longer an administrator.', array( 'status' => 403 ) );
+			$user = $grant['u'] > 0 ? get_userdata( $grant['u'] ) : false;
+			if ( ! $user || ! user_can( $user, 'manage_options' ) ) {
+				return new WP_Error( 'sve_key_user', 'The user who connected this app is no longer an administrator.', array( 'status' => 403 ) );
+			}
+			self::$current = array( 'id' => 'oauth:' . $grant['c'], 'label' => $grant['name'], 'level' => $grant['l'], 'user' => $user->ID, 'oauth' => true );
+			wp_set_current_user( $user->ID );
+			if ( 'admin' !== $grant['l'] ) {
+				kses_init_filters();
 			}
 
 			return true;
@@ -213,74 +335,88 @@ final class Api {
 		if ( $fails >= self::FAILS_PER_WINDOW ) {
 			return self::limited( 'Too many wrong keys. Try again in a few minutes.', 600 );
 		}
-		set_transient( $bucket, $fails + 1, 10 * MINUTE_IN_SECONDS );
+		if ( 0 === $fails ) {
+			set_transient( $bucket, 1, 10 * MINUTE_IN_SECONDS );
+		} else {
+			// Keep the window's original expiry: only the counter changes.
+			update_option( '_transient_' . $bucket, $fails + 1, false );
+			wp_cache_set( $bucket, $fails + 1, 'transient' );
+		}
 
 		return new WP_Error( 'sve_bad_key', 'Missing or wrong API key.', array( 'status' => 401 ) );
 	}
 
 	/**
-	 * Per-minute (and, for writes, per-day) counters, shared by all callers of the key.
-	 *
-	 * @return true|WP_Error
+	 * @return array<string, mixed>|null
+	 */
+	public static function current_key(): ?array {
+		return self::$current;
+	}
+
+	public static function current_level(): string {
+		return null === self::$current ? '' : (string) self::$current['level'];
+	}
+
+	/**
+	 * Whether the current key may do something of a level.
+	 */
+	public static function allows( string $needed ): bool {
+		$rank = array_flip( self::LEVELS );
+
+		return null !== self::$current && $rank[ self::$current['level'] ] >= $rank[ $needed ];
+	}
+
+	/**
+	 * Per-minute (and, for writes, per-day) counters of a key.
 	 */
 	public static function throttle( bool $write ): ?WP_Error {
+		$key    = null === self::$current ? 'none' : self::$current['id'];
 		$minute = (int) floor( time() / 60 );
 		$retry  = 60 - ( time() % 60 );
-		$kind   = $write ? 'w' : 'r';
-		$name   = 'sve_rl_' . $kind . '_' . $minute;
-		$count  = (int) get_transient( $name ) + 1;
-		set_transient( $name, $count, 2 * MINUTE_IN_SECONDS );
+		$name   = 'sve_rl_' . $key . '_' . ( $write ? 'w' : 'r' ) . '_' . $minute;
+		$count  = self::bump( $name, 2 * MINUTE_IN_SECONDS );
 
 		if ( $count > ( $write ? self::WRITES_PER_MINUTE : self::READS_PER_MINUTE ) ) {
 			return self::limited( 'Slow down: too many requests this minute.', $retry );
 		}
-
-		if ( $write ) {
-			$day   = 'sve_day_' . gmdate( 'Ymd' );
-			$total = (int) get_transient( $day ) + 1;
-			set_transient( $day, $total, DAY_IN_SECONDS );
-			if ( $total > self::WRITES_PER_DAY ) {
-				return self::limited( 'The daily limit of changes was reached.', 3600 );
-			}
+		if ( $write && self::bump( 'sve_day_' . $key . '_' . gmdate( 'Ymd' ), DAY_IN_SECONDS ) > self::WRITES_PER_DAY ) {
+			return self::limited( 'The daily limit of changes was reached.', 3600 );
 		}
 
 		return null;
 	}
 
 	/**
-	 * The administrator the key acts as (the one who created it, or the first administrator for older keys), or 0
-	 * when that user is gone or no longer administers the site.
+	 * Increments a counter (atomic with a persistent object cache).
 	 */
-	public static function acting_user(): int {
-		$id = self::$acting > 0 ? self::$acting : self::settings()['user'];
-		if ( $id <= 0 ) {
-			$admins = get_users( array( 'role' => 'administrator', 'number' => 1, 'fields' => 'ID', 'orderby' => 'ID' ) );
-			$id     = (int) ( $admins[0] ?? 0 );
+	private static function bump( string $name, int $ttl ): int {
+		if ( wp_using_ext_object_cache() ) {
+			wp_cache_add( $name, 0, 'sve', $ttl );
+			$value = wp_cache_incr( $name, 1, 'sve' );
+
+			return false === $value ? 1 : (int) $value;
 		}
+		$count = (int) get_transient( $name ) + 1;
+		set_transient( $name, $count, $ttl );
 
-		return $id > 0 && user_can( $id, 'manage_options' ) ? $id : 0;
+		return $count;
 	}
 
 	/**
-	 * What the AI changed, newest last (the last 200 entries).
-	 *
-	 * @return array<int, array{t: int, what: string}>
+	 * Remembers that the current key was used (shown in the settings screen).
 	 */
-	public static function log_entries(): array {
-		$log = get_option( self::LOG, array() );
-
-		return is_array( $log ) ? $log : array();
-	}
-
-	public static function log( string $what ): void {
-		// ponytail: option ring buffer; move to a table if more history than 200 entries is needed.
-		update_option( self::LOG, array_slice( array_merge( self::log_entries(), array( array( 't' => time(), 'what' => mb_substr( $what, 0, 300 ) ) ) ), -200 ), false );
-	}
-
-	/**
-	 * Remembers that the key was used (shown in the settings screen).
-	 */
-	public static function touch(): void {
-		update_option( self::USAGE, array( 'last_used' => time(), 'calls' => self::settings()['calls'] + 1 ), false );
+	public static function touch( int $calls ): void {
+		if ( null === self::$current || ! empty( self::$current['oauth'] ) ) {
+			return;
+		}
+		$s = self::settings();
+		foreach ( $s['keys'] as $i => $key ) {
+			if ( $key['id'] === self::$current['id'] ) {
+				$s['keys'][ $i ]['calls']    += $calls;
+				$s['keys'][ $i ]['last_used'] = time();
+				self::write( $s );
+				return;
+			}
+		}
 	}
 }

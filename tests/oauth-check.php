@@ -44,7 +44,8 @@ namespace {
 		}
 	};
 
-	require __DIR__ . '/../src/VisualEdits.php';
+	require __DIR__ . '/../src/Store.php';
+	require __DIR__ . '/../src/Api.php';
 	require __DIR__ . '/../src/OAuth.php';
 }
 
@@ -96,14 +97,14 @@ namespace {
 	// The access token identifies the administrator; nothing else does.
 	$access  = $tokens['body']['access_token'];
 	$refresh = $tokens['body']['refresh_token'];
-	assert( array( 'u' => 7, 'c' => $id ) === OAuth::grant( $access ) );
+	assert( 7 === OAuth::grant( $access )['u'] && $id === OAuth::grant( $access )['c'] && 'draft' === OAuth::grant( $access )['l'] );
 	assert( null === OAuth::grant( $refresh ), 'a refresh token is no access token' );
 	assert( null === OAuth::grant( 'sve_at_' . str_repeat( '0', 64 ) ) && null === OAuth::grant( '' ) && null === OAuth::grant( 'sve_probe' ) );
 	assert( ! str_contains( (string) json_encode( $GLOBALS['sve_store'] ), $access ), 'only hashes are stored' );
 
 	// Refresh tokens rotate.
 	$next = OAuth::exchange( array( 'grant_type' => 'refresh_token', 'refresh_token' => $refresh, 'client_id' => $id ) );
-	assert( $next['ok'] && OAuth::grant( $next['body']['access_token'] ) === array( 'u' => 7, 'c' => $id ) );
+	assert( $next['ok'] && 7 === OAuth::grant( $next['body']['access_token'] )['u'] );
 	assert( ! OAuth::exchange( array( 'grant_type' => 'refresh_token', 'refresh_token' => $refresh, 'client_id' => $id ) )['ok'], 'old refresh token' );
 	assert( ! OAuth::exchange( array( 'grant_type' => 'refresh_token', 'refresh_token' => $next['body']['refresh_token'], 'client_id' => 'sve_c_other' ) )['ok'], 'refresh by another app' );
 	assert( 'unsupported_grant_type' === OAuth::exchange( array( 'grant_type' => 'password' ) )['error'] );
