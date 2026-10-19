@@ -67,6 +67,10 @@ final class AdminPage {
 				Api::revoke();
 				$this->back( 'revoked' );
 				break;
+			case 'disconnect':
+				OAuth::revoke_all();
+				$this->back( 'disconnected' );
+				break;
 			case 'discard':
 				$this->edits->set_draft( null );
 				$this->back( 'discarded' );
@@ -105,7 +109,15 @@ final class AdminPage {
 		$code = (int) wp_remote_retrieve_response_code( $response );
 		$body = (string) wp_remote_retrieve_body( $response );
 		if ( 401 === $code && str_contains( $body, 'Wrong API key' ) ) {
-			return array( 'ok' => true, 'msg' => __( 'Works: the endpoint answers and the Authorization header arrives.', 'visual-editor' ) );
+			$meta = wp_remote_get( home_url( '/.well-known/oauth-authorization-server' ), array( 'timeout' => 10, 'sslverify' => (bool) apply_filters( 'https_local_ssl_verify', false ) ) );
+			$ok   = ! is_wp_error( $meta ) && 200 === (int) wp_remote_retrieve_response_code( $meta ) && str_contains( (string) wp_remote_retrieve_body( $meta ), 'authorization_endpoint' );
+
+			return array(
+				'ok'  => true,
+				'msg' => __( 'Works: the endpoint answers and the Authorization header arrives.', 'visual-editor' ) . ' ' . ( $ok
+					? __( 'Web apps (OAuth) can connect too.', 'visual-editor' )
+					: __( 'But /.well-known/ is not served by WordPress here, so web apps such as Claude.ai cannot connect with OAuth yet: allow /.well-known/ in your server config (nginx often blocks dot-folders). Pasted keys still work.', 'visual-editor' ) ),
+			);
 		}
 		if ( 401 === $code && str_contains( $body, 'Missing API key' ) ) {
 			return array( 'ok' => false, 'msg' => __( 'The endpoint answers, but your server drops the Authorization header. On Apache add this to .htaccess: RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}] — or send the key in an "X-Sve-Key" header instead.', 'visual-editor' ) );
@@ -178,6 +190,7 @@ final class AdminPage {
 			'saved'     => __( 'Settings saved.', 'visual-editor' ),
 			'revoked'   => __( 'Key revoked. Every AI tool that used it stops working.', 'visual-editor' ),
 			'discarded' => __( 'Proposed changes discarded.', 'visual-editor' ),
+			'disconnected' => __( 'All connected apps were disconnected.', 'visual-editor' ),
 		);
 		$notice   = isset( $_GET['sve_notice'] ) ? sanitize_key( wp_unslash( (string) $_GET['sve_notice'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		$time     = static fn ( int $t ): string => $t > 0 ? wp_date( 'Y-m-d H:i', $t ) : '—';
@@ -270,7 +283,28 @@ final class AdminPage {
 	</div>
 
 	<div class="sve-card">
-		<h2>4 · <?php esc_html_e( 'What the AI changed', 'visual-editor' ); ?></h2>
+		<h2>4 · <?php esc_html_e( 'Connect a web app (OAuth)', 'visual-editor' ); ?></h2>
+		<p><?php esc_html_e( 'For apps that take a server address but no pasted key, such as Claude.ai: add a custom connector with this address. The app opens a page on this site where you sign in and press Allow.', 'visual-editor' ); ?></p>
+		<pre id="sve-oauth-url"><?php echo esc_html( $status['endpoint'] ); ?></pre>
+		<button type="button" class="button" data-sve-copy="sve-oauth-url"><?php esc_html_e( 'Copy', 'visual-editor' ); ?></button>
+		<?php $apps = OAuth::summary(); ?>
+		<?php if ( array() !== $apps ) : ?>
+			<h3><?php esc_html_e( 'Connected apps', 'visual-editor' ); ?></h3>
+			<ul>
+				<?php foreach ( $apps as $app ) : ?>
+					<li><?php echo esc_html( sprintf( /* translators: 1: app name, 2: registered, 3: last used */ __( '%1$s · added %2$s · last connected %3$s', 'visual-editor' ), $app['name'], $time( (int) $app['created'] ), $time( (int) $app['last_used'] ) ) ); ?></li>
+				<?php endforeach; ?>
+			</ul>
+			<form method="post">
+				<?php wp_nonce_field( 'sve_ai' ); ?>
+				<button class="button" name="sve_do" value="disconnect" onclick="return confirm('<?php echo esc_js( __( 'Disconnect every app? They have to be approved again.', 'visual-editor' ) ); ?>')"><?php esc_html_e( 'Disconnect all apps', 'visual-editor' ); ?></button>
+			</form>
+		<?php endif; ?>
+		<p class="description"><?php esc_html_e( 'An app gets the permission level chosen above and acts as the administrator who approved it. Access tokens last an hour and refresh by themselves; switching AI access off stops them at once.', 'visual-editor' ); ?></p>
+	</div>
+
+	<div class="sve-card">
+		<h2>5 · <?php esc_html_e( 'What the AI changed', 'visual-editor' ); ?></h2>
 		<?php $log = array_slice( array_reverse( Api::log_entries() ), 0, 50 ); ?>
 		<?php if ( array() === $log ) : ?>
 			<p><?php esc_html_e( 'Nothing yet.', 'visual-editor' ); ?></p>

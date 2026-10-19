@@ -28,6 +28,9 @@ final class Api {
 	/** Token the settings page's connection test sends: never a valid key. */
 	public const PROBE = 'sve_probe';
 
+	/** Administrator an OAuth token acts as, for the request being served (0 = the key's own user). */
+	private static int $acting = 0;
+
 	public const READS_PER_MINUTE = 120;
 
 	public const WRITES_PER_MINUTE = 30;
@@ -166,7 +169,7 @@ final class Api {
 	 */
 	public static function authenticate( WP_REST_Request $request ) {
 		$settings = self::settings();
-		if ( ! $settings['enabled'] || '' === $settings['hash'] ) {
+		if ( ! $settings['enabled'] ) {
 			return new WP_Error( 'sve_api_disabled', 'The AI API is switched off.', array( 'status' => 403 ) );
 		}
 
@@ -174,13 +177,24 @@ final class Api {
 		if ( '' === $header && isset( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ) ) { // Apache with rewrite rules moves it here.
 			$header = (string) wp_unslash( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 		}
-		$token  =0 === stripos( $header, 'bearer ' ) ? trim( substr( $header, 7 ) ) : trim( (string) $request->get_header( 'x-sve-key' ) );
+		$token  = 0 === stripos( $header, 'bearer ' ) ? trim( substr( $header, 7 ) ) : trim( (string) $request->get_header( 'x-sve-key' ) );
 
 		// The right key always gets in: the key is 192 random bits, and a lockout keyed on the IP must not
 		// shut out the real client when someone else behind the same address guesses wrong.
-		if ( '' !== $token && hash_equals( $settings['hash'], self::hash( $token ) ) ) {
+		if ( '' !== $token && '' !== $settings['hash'] && hash_equals( $settings['hash'], self::hash( $token ) ) ) {
 			if ( self::acting_user() <= 0 ) {
 				return new WP_Error( 'sve_no_admin', 'The key belongs to a user who is no longer an administrator.', array( 'status' => 403 ) );
+			}
+
+			return true;
+		}
+
+		// An OAuth access token (web AI apps): it acts as the administrator who approved the app.
+		$grant = OAuth::grant( $token );
+		if ( null !== $grant ) {
+			self::$acting = $grant['u'];
+			if ( self::acting_user() <= 0 ) {
+				return new WP_Error( 'sve_no_admin', 'The user who connected this app is no longer an administrator.', array( 'status' => 403 ) );
 			}
 
 			return true;
@@ -195,7 +209,7 @@ final class Api {
 		}
 
 		$bucket = 'sve_fail_' . md5( self::ip() );
-		$fails  =(int) get_transient( $bucket );
+		$fails  = (int) get_transient( $bucket );
 		if ( $fails >= self::FAILS_PER_WINDOW ) {
 			return self::limited( 'Too many wrong keys. Try again in a few minutes.', 600 );
 		}
@@ -238,7 +252,7 @@ final class Api {
 	 * when that user is gone or no longer administers the site.
 	 */
 	public static function acting_user(): int {
-		$id = self::settings()['user'];
+		$id = self::$acting > 0 ? self::$acting : self::settings()['user'];
 		if ( $id <= 0 ) {
 			$admins = get_users( array( 'role' => 'administrator', 'number' => 1, 'fields' => 'ID', 'orderby' => 'ID' ) );
 			$id     = (int) ( $admins[0] ?? 0 );

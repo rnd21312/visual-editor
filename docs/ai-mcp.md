@@ -30,6 +30,16 @@ Behind a CDN or proxy, wrong-key blocking uses the proxy's address for everyone.
 
 The endpoint speaks JSON-RPC 2.0 (`initialize`, `ping`, `tools/list`, `tools/call`).
 
+## Connect a web app (OAuth)
+
+Apps that ask for a server address instead of a pasted key, such as Claude.ai custom connectors, use OAuth 2.1:
+
+1. Add a connector with the endpoint address from the **AI (MCP)** page.
+2. The app opens a page on your site. Sign in as an administrator and press **Allow**.
+3. The app gets an access token (valid one hour, renewed automatically with a rotating refresh token). It acts as you, with the permission level chosen on the page. **Disconnect all apps** on the page ends every connection.
+
+Details: the app registers itself (RFC 7591), the flow is authorization code with PKCE `S256` (no secrets, no plain PKCE), redirect addresses must be https, loopback or an editor scheme, and tokens are stored only as hashes. The site publishes `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource`; if your server blocks `/.well-known/` (nginx configs that deny dot-folders do), allow it. The page's **Test the connection** button tells you.
+
 ## Permission levels
 
 | Level | What the AI can do |

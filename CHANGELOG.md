@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - **Full access** level: the `wp` tool calls any WordPress REST route as the administrator who created the key; `upload_media` adds files by URL.
 - Each site names its MCP server after its domain and tells the AI what the site is, so several sites can be connected at once.
 - `edit` applies several changes in one call, all or nothing, with one revision.
+- **OAuth 2.1** for web AI apps such as Claude.ai connectors: dynamic client registration, consent page, authorization code with PKCE S256, one-hour access tokens and rotating refresh tokens, "Disconnect all apps".
 
 ### Changed
 - Six tools instead of seventeen: the tool list went from about 2,250 to about 770 tokens, and a page outline is about 90 % smaller (short ids instead of long selectors).

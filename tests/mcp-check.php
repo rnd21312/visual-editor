@@ -100,6 +100,7 @@ namespace {
 	require __DIR__ . '/../src/Compiler.php';
 	require __DIR__ . '/../src/Api.php';
 	require __DIR__ . '/../src/VisualEdits.php';
+	require __DIR__ . '/../src/OAuth.php';
 	require __DIR__ . '/../src/Mcp.php';
 }
 

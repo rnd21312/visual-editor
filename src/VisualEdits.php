@@ -112,16 +112,17 @@ final class VisualEdits {
 	}
 
 	/**
-	 * Runs a read-modify-write of the document so concurrent requests (parallel AI tool calls, an editor save)
-	 * cannot overwrite each other's changes.
+	 * Runs a read-modify-write of the document (or of another store, by lock name) so concurrent requests
+	 * (parallel AI tool calls, an editor save, a token refresh) cannot overwrite each other's changes.
 	 *
 	 * @template T
-	 * @param callable(): T $work Reads and writes the document.
+	 * @param callable(): T $work Reads and writes.
+	 * @param string        $lock Lock name.
 	 * @return T
 	 */
-	public function locked( callable $work ): mixed {
+	public static function locked( callable $work, string $lock = 'sve_document' ): mixed {
 		global $wpdb;
-		$name = $wpdb->prefix . 'sve_document';
+		$name = $wpdb->prefix . $lock;
 		// ponytail: MySQL named lock, fine for one database server; swap for a row lock if the site ever shards.
 		if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 10)', $name ) ) ) {
 			throw new \RuntimeException( 'The document is busy. Try again in a moment.' );
@@ -130,6 +131,7 @@ final class VisualEdits {
 			// Another request may have written since this one cached the options.
 			wp_cache_delete( self::OPTION, 'options' );
 			wp_cache_delete( self::DRAFT, 'options' );
+			wp_cache_delete( OAuth::OPTION, 'options' );
 			wp_cache_delete( 'notoptions', 'options' );
 
 			return $work();

@@ -36,3 +36,4 @@ jobs:
           php -d zend.assertions=1 -d assert.exception=1 tests/rebase-check.php
           php -d zend.assertions=1 -d assert.exception=1 tests/guard-check.php
           php -d zend.assertions=1 -d assert.exception=1 tests/mcp-check.php
+          php -d zend.assertions=1 -d assert.exception=1 tests/oauth-check.php

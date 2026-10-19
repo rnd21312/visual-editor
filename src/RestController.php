@@ -223,6 +223,10 @@ final class RestController {
 		if ( isset( $data['retry_after'] ) ) {
 			$response->header( 'Retry-After', (string) (int) $data['retry_after'] );
 		}
+		if ( 401 === (int) ( $data['status'] ?? 0 ) ) {
+			// Tells OAuth-capable clients (Claude.ai connectors) where to find the authorization server.
+			$response->header( 'WWW-Authenticate', 'Bearer resource_metadata="' . OAuth::resource_metadata_url() . '"' );
+		}
 
 		return $response;
 	}

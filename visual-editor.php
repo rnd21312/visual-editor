@@ -45,6 +45,7 @@ add_action(
 		$edits->hooks();
 		( new \VisualEditor\EditorScreen( $edits ) )->hooks();
 		( new \VisualEditor\AdminPage( $edits ) )->hooks();
+		( new \VisualEditor\OAuth() )->hooks();
 		add_action( 'rest_api_init', array( new \VisualEditor\RestController( $edits, new \VisualEditor\Mcp( $edits ) ), 'register_routes' ) );
 	}
 );
