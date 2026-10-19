@@ -25,6 +25,9 @@ final class Api {
 
 	public const LOG = 'sve_api_log';
 
+	/** Token the settings page's connection test sends: never a valid key. */
+	public const PROBE = 'sve_probe';
+
 	public const READS_PER_MINUTE = 120;
 
 	public const WRITES_PER_MINUTE = 30;
@@ -168,7 +171,10 @@ final class Api {
 		}
 
 		$header = (string) $request->get_header( 'authorization' );
-		$token  = 0 === stripos( $header, 'bearer ' ) ? trim( substr( $header, 7 ) ) : trim( (string) $request->get_header( 'x-sve-key' ) );
+		if ( '' === $header && isset( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ) ) { // Apache with rewrite rules moves it here.
+			$header = (string) wp_unslash( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+		}
+		$token  =0 === stripos( $header, 'bearer ' ) ? trim( substr( $header, 7 ) ) : trim( (string) $request->get_header( 'x-sve-key' ) );
 
 		// The right key always gets in: the key is 192 random bits, and a lockout keyed on the IP must not
 		// shut out the real client when someone else behind the same address guesses wrong.
@@ -180,8 +186,16 @@ final class Api {
 			return true;
 		}
 
+		// The settings page's connection test: proves the header arrives, without counting as a wrong guess.
+		if ( self::PROBE === $token ) {
+			return new WP_Error( 'sve_bad_key', 'Wrong API key.', array( 'status' => 401 ) );
+		}
+		if ( '' === $token ) {
+			return new WP_Error( 'sve_no_key', 'Missing API key: no Authorization header reached WordPress.', array( 'status' => 401 ) );
+		}
+
 		$bucket = 'sve_fail_' . md5( self::ip() );
-		$fails  = (int) get_transient( $bucket );
+		$fails  =(int) get_transient( $bucket );
 		if ( $fails >= self::FAILS_PER_WINDOW ) {
 			return self::limited( 'Too many wrong keys. Try again in a few minutes.', 600 );
 		}

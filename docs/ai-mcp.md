@@ -6,8 +6,9 @@ The editor can expose a **Model Context Protocol** endpoint so an AI assistant (
 
 ## Set up
 
-1. Open the editor and click **✦** in the top bar.
-2. Enable AI access, choose a permission level and press **Create key**. Copy the key now.
+1. In the dashboard open **AI (MCP)** (or, in the editor, click **✦** in the top bar).
+2. Press **Create API key** and copy it now. Choose a permission level, describe the site to the AI, and switch AI access on.
+   The page also has a **Test the connection** button (it shows whether your server passes the `Authorization` header on), setup snippets for Claude Code, Claude Desktop, Cursor, VS Code and curl, the changes waiting for your approval, and a log of what the AI changed.
 3. Connect your client to:
 
 ```

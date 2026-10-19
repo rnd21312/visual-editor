@@ -44,6 +44,7 @@ add_action(
 		$edits = new \Suntourz\VisualEditor\VisualEdits();
 		$edits->hooks();
 		( new \Suntourz\VisualEditor\EditorScreen( $edits ) )->hooks();
+		( new \Suntourz\VisualEditor\AdminPage( $edits ) )->hooks();
 		add_action( 'rest_api_init', array( new \Suntourz\VisualEditor\RestController( $edits, new \Suntourz\VisualEditor\Mcp( $edits ) ), 'register_routes' ) );
 	}
 );
