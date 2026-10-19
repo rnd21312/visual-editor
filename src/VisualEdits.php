@@ -42,6 +42,9 @@ final class VisualEdits {
 
 	private const POSITIONS = array( 'before', 'after', 'prepend', 'append' );
 
+	/** Whether the document being sanitized may keep unfiltered HTML and runnable embeds (set by sanitize()). */
+	private bool $unfiltered = false;
+
 	public function hooks(): void {
 		add_action( 'wp_head', array( $this, 'print_css' ), 99 );
 		add_action( 'wp_head', array( $this, 'print_data' ), 98 );
@@ -64,7 +67,9 @@ final class VisualEdits {
 	public function get(): array {
 		$saved = get_option( self::OPTION, array() );
 
-		return $this->sanitize( is_array( $saved ) ? $saved : array() );
+		// Stored documents were filtered when they were written: re-filtering for whoever reads them would strip
+		// an administrator's embeds for every visitor.
+		return $this->sanitize( is_array( $saved ) ? $saved : array(), true );
 	}
 
 	/**
@@ -73,11 +78,43 @@ final class VisualEdits {
 	 */
 	public function save( array $input ): array {
 		$doc = $this->sanitize( $input );
-		if ( ! current_user_can( 'manage_options' ) ) {
-			$doc['access'] = $this->get()['access']; // Only administrators decide who gets access.
-		}
 
-		return $this->store( $doc );
+		return $this->locked(
+			function () use ( $doc ): array {
+				if ( ! current_user_can( 'manage_options' ) ) {
+					$doc['access'] = $this->get()['access']; // Only administrators decide who gets access.
+				}
+
+				return $this->store( $doc );
+			}
+		);
+	}
+
+	/**
+	 * Runs a read-modify-write of the document so concurrent requests (parallel AI tool calls, an editor save)
+	 * cannot overwrite each other's changes.
+	 *
+	 * @template T
+	 * @param callable(): T $work Reads and writes the document.
+	 * @return T
+	 */
+	public function locked( callable $work ): mixed {
+		global $wpdb;
+		$name = $wpdb->prefix . 'sve_document';
+		// ponytail: MySQL named lock, fine for one database server; swap for a row lock if the site ever shards.
+		if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 10)', $name ) ) ) {
+			throw new \RuntimeException( 'The document is busy. Try again in a moment.' );
+		}
+		try {
+			// Another request may have written since this one cached the options.
+			wp_cache_delete( self::OPTION, 'options' );
+			wp_cache_delete( self::DRAFT, 'options' );
+			wp_cache_delete( 'notoptions', 'options' );
+
+			return $work();
+		} finally {
+			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $name ) );
+		}
 	}
 
 	/**
@@ -102,14 +139,19 @@ final class VisualEdits {
 	}
 
 	/**
-	 * Changes proposed by the AI API, waiting for a person to review them.
+	 * Changes proposed by the AI API, waiting for a person to review them, replayed on top of the live document
+	 * so approving a draft never reverts what was saved live after the AI started it.
 	 *
 	 * @return array<string, mixed>|null
 	 */
 	public function draft(): ?array {
 		$saved = get_option( self::DRAFT, null );
+		if ( ! is_array( $saved ) ) {
+			return null;
+		}
+		$doc = is_array( $saved['doc'] ?? null ) ? self::rebase( (array) ( $saved['base'] ?? array() ), $saved['doc'], $this->get() ) : $saved;
 
-		return is_array( $saved ) ? $this->sanitize( $saved ) : null;
+		return $this->sanitize( $doc, true );
 	}
 
 	/**
@@ -119,8 +161,51 @@ final class VisualEdits {
 		if ( null === $doc ) {
 			delete_option( self::DRAFT );
 		} else {
-			update_option( self::DRAFT, $doc, false );
+			// The live document it was based on, so draft() can replay only the AI's own changes.
+			update_option( self::DRAFT, array( 'base' => $this->get(), 'doc' => $doc ), false );
 		}
+	}
+
+	/**
+	 * Three-way merge: the changes `$mine` made to `$base`, applied to `$theirs`. Items match by id (SEO by page
+	 * key); where both sides changed the same item, `$mine` wins.
+	 *
+	 * @param array<string, mixed> $base   Document the draft started from.
+	 * @param array<string, mixed> $mine   Draft.
+	 * @param array<string, mixed> $theirs Current live document.
+	 * @return array<string, mixed>
+	 */
+	public static function rebase( array $base, array $mine, array $theirs ): array {
+		$merge = static function ( array $old, array $new, array $result ): array {
+			foreach ( $old as $key => $item ) {
+				if ( ! array_key_exists( $key, $new ) ) {
+					unset( $result[ $key ] );
+				}
+			}
+			foreach ( $new as $key => $item ) {
+				if ( ! array_key_exists( $key, $old ) || $old[ $key ] !== $item ) {
+					$result[ $key ] = $item;
+				}
+			}
+
+			return $result;
+		};
+		$by_id = static fn ( mixed $list ): array => array_column( is_array( $list ) ? $list : array(), null, 'id' );
+
+		$out = $theirs;
+		foreach ( array( 'edits', 'ops', 'components' ) as $list ) {
+			$out[ $list ] = array_values( $merge( $by_id( $base[ $list ] ?? null ), $by_id( $mine[ $list ] ?? null ), $by_id( $theirs[ $list ] ?? null ) ) );
+		}
+		$out['seo'] = $merge( (array) ( $base['seo'] ?? array() ), (array) ( $mine['seo'] ?? array() ), (array) ( $theirs['seo'] ?? array() ) );
+
+		$old_css = (string) ( $base['css'] ?? '' );
+		$new_css = (string) ( $mine['css'] ?? '' );
+		if ( $new_css !== $old_css ) {
+			// CSS the draft appended goes after the live CSS; any other change replaces it.
+			$out['css'] = str_starts_with( $new_css, $old_css ) ? trim( (string) ( $theirs['css'] ?? '' ) . "\n" . trim( substr( $new_css, strlen( $old_css ) ) ) ) : $new_css;
+		}
+
+		return $out;
 	}
 
 	/**
@@ -151,18 +236,20 @@ final class VisualEdits {
 		if ( ! isset( $revisions[ $id ]['doc'] ) || ! is_array( $revisions[ $id ]['doc'] ) ) {
 			return null;
 		}
-		$doc = $this->sanitize( $revisions[ $id ]['doc'] );
+		$doc = $this->sanitize( $revisions[ $id ]['doc'], true );
 		$this->store( $doc );
 
 		return $doc;
 	}
 
 	/**
-	 * @param array<string, mixed> $input Raw document.
+	 * @param array<string, mixed> $input      Raw document.
+	 * @param bool|null            $unfiltered Keep unfiltered HTML and embeds; null = whether the current user may post them.
 	 * @return array{v:int, css:string, edits:array<int, array<string, mixed>>}
 	 */
-	public function sanitize( array $input ): array {
-		$edits = array();
+	public function sanitize( array $input, ?bool $unfiltered = null ): array {
+		$this->unfiltered = $unfiltered ?? current_user_can( 'unfiltered_html' );
+		$edits            = array();
 		$seen  = array();
 
 		foreach ( array_slice( (array) ( $input['edits'] ?? array() ), 0, self::MAX_EDITS ) as $raw ) {
@@ -200,7 +287,7 @@ final class VisualEdits {
 	private function html( mixed $value, int $max = 50000 ): string {
 		$html = substr( is_string( $value ) ? $value : '', 0, $max );
 
-		return current_user_can( 'unfiltered_html' ) ? $html : wp_kses_post( $html );
+		return $this->unfiltered ? $html : wp_kses_post( $html );
 	}
 
 	private function id( mixed $value ): string {
@@ -256,7 +343,7 @@ final class VisualEdits {
 					$op['comp'] = $this->id( $item['comp'] );
 				}
 				// Embed snippets may run scripts, which only users allowed to post unfiltered HTML can add.
-				if ( ! empty( $item['exec'] ) && current_user_can( 'unfiltered_html' ) ) {
+				if ( ! empty( $item['exec'] ) && $this->unfiltered ) {
 					$op['exec'] = true;
 				}
 				if ( '' === trim( $op['html'] ) && empty( $op['comp'] ) ) {
@@ -539,8 +626,7 @@ final class VisualEdits {
 			$edit['text'] = substr( (string) wp_check_invalid_utf8( $raw['text'] ), 0, 20000 );
 		}
 		if ( isset( $raw['html'] ) && is_string( $raw['html'] ) ) {
-			$html         = substr( $raw['html'], 0, 50000 );
-			$edit['html'] = current_user_can( 'unfiltered_html' ) ? $html : wp_kses_post( $html );
+			$edit['html'] = $this->html( $raw['html'] );
 		}
 
 		$attrs = $this->attrs( $raw['attrs'] ?? array() );

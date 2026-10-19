@@ -26,13 +26,15 @@ final class Outline {
 			return new \WP_Error( 'sve_outline_host', 'Only pages of this site can be read.' );
 		}
 
-		$response = wp_remote_get(
+		// Safe variant: refuses other ports and private addresses, and checks every redirect the same way.
+		$response = wp_safe_remote_get(
 			$url,
 			array(
-				'timeout'     => 10,
-				'redirection' => 3,
-				'user-agent'  => 'SuntourzVisualEditor/' . SVE_VERSION,
-				'sslverify'   => (bool) apply_filters( 'https_local_ssl_verify', false ),
+				'timeout'             => 10,
+				'redirection'         => 3,
+				'limit_response_size' => 4 * MB_IN_BYTES,
+				'user-agent'          => 'SuntourzVisualEditor/' . SVE_VERSION,
+				'sslverify'           => (bool) apply_filters( 'https_local_ssl_verify', false ),
 			)
 		);
 		if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
