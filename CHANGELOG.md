@@ -12,6 +12,12 @@ Merges the Suntourz visual builder into this plugin.
 - **OAuth 2.1** for web AI apps (Claude.ai connectors): dynamic client registration, consent page with a level choice, PKCE S256, one-hour access tokens, rotating refresh tokens, "Disconnect all apps".
 - **AI (MCP)** dashboard page: keys, site description, connection test, setup snippets, pending-approval banner, activity log. Each site names its MCP server after its domain.
 
+### Changed (MCP)
+- Three tools (`site`, `do`, `wp`) instead of sixty: the tool list is about 450 tokens instead of about 9,700. Operations are listed by `site` and their schemas come on demand. Compact JSON results.
+- Every result carries the site host; the instructions name the site so several connected sites are not mixed up.
+- `wp` can search routes and never reaches the plugin's admin API or application passwords; answers are capped at 40 KB.
+- Faster editor start: shell renders before the preview, Persian dictionary loads only for Persian users, shared chunks are preloaded.
+
 ### Fixed
 - Writes to the document are serialised with a database lock.
 - CSS escapes can no longer smuggle `@import`, `url(javascript:)` or `expression()` past the filter.

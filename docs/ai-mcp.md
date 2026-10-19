@@ -51,22 +51,23 @@ Details: the app registers itself (RFC 7591), the flow is authorization code wit
 
 Admin is as powerful as an administrator login. Deleting content and changing users may not be undoable. Use it only with an assistant you trust.
 
-## Tools
+## Tools and token use
 
-About 60 tools in the groups below; `tools/list` marks the ones the current key is not allowed to call.
+The AI receives **three tools** at the start of every session (about 450 tokens instead of about 9,700 for the full catalogue):
 
-| Group | Examples |
+| Tool | Purpose |
 | --- | --- |
-| Look | `get_site_overview`, `get_guide`, `list_content`, `get_page_outline`, `find_elements`, `inspect_element`, `screenshot`, `render_preview` |
-| Content | `create_content`, `update_content`, `set_page_layout`, `edit_layout`, `list_media`, `upload_media`, `save_menu`, `save_term` |
-| Templates | `list_templates`, `create_template`, `update_template` |
-| Style & structure | `set_style`, `add_css`, `set_content`, `insert_html`, `move_element`, `remove_element`, `change_tag`, `hide_element`, `set_motion` |
-| Design system | `set_design_tokens`, `set_global_css`, `save_component`, `set_library`, `add_script` |
-| SEO & settings | `set_seo`, `get_settings`, `update_settings`, `manage_plugin` |
-| History | `list_revisions`, `restore_revision`, `publish_draft`, `discard_draft`, `get_activity` |
-| Escape hatch | `wp_rest` (any REST route, admin level) |
+| `site` | Start here. Site name, URL, your description of it, theme, plugins, content types, templates, components, and one line for every operation this key may run. `guide: "all"` adds the how-to |
+| `do` | Runs one of about 60 operations: `{tool, args}`. `{tool, help: true}` returns that operation's schema on demand |
+| `wp` | Any WordPress / plugin REST route as the key's administrator (GET for every key, changes need `admin`). Without `route`, `search` finds routes. The plugin's own admin API, the MCP endpoint and application passwords are blocked |
+
+Operations include: `get_page_outline`, `find_elements`, `inspect_element`, `screenshot`, `create_content`, `edit_layout`, `create_template`, `set_style`, `add_css`, `insert_html`, `set_design_tokens`, `save_component`, `set_seo`, `upload_media`, `save_menu`, `manage_plugin`, `list_revisions`, `restore_revision`, `publish_draft` and more. Results are compact JSON.
 
 Keep the visual editor open while the AI works: it answers screenshot and computed-style requests and shows what the AI points at (`show_in_editor`).
+
+## Several sites on one AI client
+
+Every site names its MCP server after its domain (`wp-shop-example-com`) and sends the AI its name, URL and your **site description** when it connects. Each result repeats `site` (the host), and the instructions tell the AI which site it is talking to, so changes meant for one site are not applied to another. Give each site a clear description on the **AI (MCP)** page.
 
 ## Safety
 

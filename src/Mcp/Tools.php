@@ -221,6 +221,15 @@ final class Tools {
 	 * @return array<int, array<string, mixed>>
 	 */
 	public static function listing(): array {
+		return self::facade();
+	}
+
+	/**
+	 * The full catalogue (every operation with its schema), for clients that want it.
+	 *
+	 * @return array<int, array<string, mixed>>
+	 */
+	public static function full_listing(): array {
 		$out = array();
 		foreach ( self::all() as $tool ) {
 			$description = $tool['description'];
@@ -241,10 +250,151 @@ final class Tools {
 		return $out;
 	}
 
-	public static function is_write( string $name ): bool {
+	public static function is_write( string $name, array $args = array() ): bool {
+		if ( 'wp' === $name ) {
+			return 'GET' !== strtoupper( (string) ( $args['method'] ?? 'GET' ) ) && '' !== (string) ( $args['route'] ?? '' );
+		}
+		if ( 'do' === $name ) {
+			return self::is_write( (string) ( $args['tool'] ?? '' ), (array) ( $args['args'] ?? array() ) ) && empty( $args['help'] );
+		}
 		$tool = self::all()[ $name ] ?? null;
 
 		return null !== $tool && 'read' !== $tool['level'];
+	}
+
+	/* ------------------------------------------------------------------ compact surface */
+
+	private const FACADE = array( 'site', 'do', 'wp' );
+
+	/**
+	 * Three tools instead of sixty: the list the AI receives at the start of every session stays around 600
+	 * tokens, and the operations it may use are listed (one line each) by `site`. Schemas come on demand.
+	 *
+	 * @return array<int, array<string, mixed>>
+	 */
+	public static function facade(): array {
+		return array(
+			array(
+				'name'        => 'site',
+				'description' => 'START HERE. This site (name, url, what it is, theme, plugins, content types, templates, components) and the operations you may run with `do`. With several WordPress sites connected, check `site.url` matches the site you mean.',
+				'inputSchema' => self::obj( array( 'guide' => self::enum( array( 'all', 'workflow', 'editing', 'syntax', 'components', 'design', 'seo', 'admin' ), 'Also return a how-to topic ("all" once per session)' ) ) ),
+				'annotations' => array( 'readOnlyHint' => true ),
+			),
+			array(
+				'name'        => 'do',
+				'description' => 'Run one operation listed by `site` (look at pages, edit styles/layouts, build pages and templates, content, SEO, components, revisions…). Pass help:true to get an operation\'s argument schema first.',
+				'inputSchema' => self::obj(
+					array(
+						'tool' => self::str( 'Operation name' ),
+						'args' => self::any( 'Its arguments' ),
+						'help' => self::bool( 'Return the schema instead of running' ),
+					),
+					array( 'tool' )
+				),
+				'annotations' => array( 'readOnlyHint' => false, 'destructiveHint' => true ),
+			),
+			array(
+				'name'        => 'wp',
+				'description' => 'Any WordPress / plugin REST route as the key\'s administrator (GET for every key; changes need an admin key). Without `route`, `search` finds routes. Use _fields to keep answers small.',
+				'inputSchema' => self::obj(
+					array(
+						'route'  => self::str( 'e.g. /wp/v2/posts' ),
+						'method' => self::enum( array( 'GET', 'POST', 'PUT', 'PATCH', 'DELETE' ), 'Default GET' ),
+						'params' => self::any( 'Query parameters' ),
+						'body'   => self::any( 'JSON body' ),
+						'search' => self::str( 'Find routes containing this text' ),
+					)
+				),
+				'annotations' => array( 'readOnlyHint' => false, 'destructiveHint' => true ),
+			),
+		);
+	}
+
+	/**
+	 * One line per operation this key may run.
+	 *
+	 * @return array<int, string>
+	 */
+	private static function operations(): array {
+		$out = array();
+		foreach ( self::all() as $tool ) {
+			if ( 'wp_rest' === $tool['name'] || ! Api::allows( $tool['level'] ) ) {
+				continue;
+			}
+			$first = (string) preg_replace( '/(?<=[.!?])\s.*$/s', '', $tool['description'] );
+			$out[] = $tool['name'] . ' — ' . ( mb_strlen( $first ) > 110 ? mb_substr( $first, 0, 107 ) . '…' : $first );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * @param array<string, mixed> $a Arguments.
+	 * @return array<string, mixed>
+	 */
+	private static function site_tool( array $a ): array {
+		$out = array_merge(
+			array( 'server' => Api::server_name(), 'about' => Api::settings()['about'], 'level' => Api::current_level() ),
+			self::overview()
+		);
+		if ( ! empty( $a['guide'] ) ) {
+			$out['guide'] = Guide::text( (string) $a['guide'] );
+		}
+		$out['operations'] = self::operations();
+		$out['how']        = 'do{tool,args}; do{tool,help:true} shows the schema. Sites are told apart by site.url.';
+
+		return $out;
+	}
+
+	/**
+	 * @param array<string, mixed> $a Arguments.
+	 * @return array<string, mixed>
+	 */
+	private static function do_tool( array $a ): array {
+		$name = (string) ( $a['tool'] ?? '' );
+		if ( in_array( $name, self::FACADE, true ) || 'wp_rest' === $name ) {
+			throw new RuntimeException( 'Use the ' . ( 'wp_rest' === $name ? 'wp' : $name ) . ' tool directly.' );
+		}
+		$tool = self::all()[ $name ] ?? null;
+		if ( null === $tool ) {
+			throw new RuntimeException( 'Unknown operation "' . $name . '". `site` lists them.' );
+		}
+		if ( ! empty( $a['help'] ) ) {
+			return array( 'tool' => $name, 'needs' => $tool['level'], 'description' => $tool['description'], 'inputSchema' => $tool['inputSchema'] );
+		}
+
+		return self::call( $name, is_array( $a['args'] ?? null ) ? $a['args'] : array() );
+	}
+
+	/**
+	 * Routes of this site that match a search (name and methods only).
+	 *
+	 * @return array<string, mixed>
+	 */
+	private static function find_routes( string $search ): array {
+		$found = array();
+		foreach ( rest_get_server()->get_routes() as $route => $handlers ) {
+			if ( ! self::route_allowed( $route ) || ( '' !== $search && false === stripos( $route, $search ) ) ) {
+				continue;
+			}
+			$methods = array();
+			foreach ( $handlers as $handler ) {
+				$methods = array_merge( $methods, array_keys( (array) ( $handler['methods'] ?? array() ) ) );
+			}
+			$found[] = $route . ' [' . implode( ',', array_unique( $methods ) ) . ']';
+		}
+
+		return array( 'routes' => array_slice( $found, 0, 60 ), 'total' => count( $found ), 'hint' => 'Narrow with search; call with route.' );
+	}
+
+	/**
+	 * Routes the AI must never reach through `wp`: this plugin's own admin API (keys), the MCP endpoint and
+	 * application passwords (they would outlive a revoked key). Any spelling of the path is normalised first.
+	 */
+	public static function route_allowed( string $route ): bool {
+		$path = strtolower( '/' . trim( (string) preg_replace( '#/+#', '/', rawurldecode( $route ) ), '/' ) );
+
+		return ! str_starts_with( $path, '/sve/' ) && ! str_contains( $path, 'application-passwords' );
 	}
 
 	/**
@@ -252,6 +402,15 @@ final class Tools {
 	 * @return array<string, mixed>
 	 */
 	public static function call( string $name, array $args ): array {
+		if ( 'site' === $name ) {
+			return self::site_tool( $args );
+		}
+		if ( 'do' === $name ) {
+			return self::do_tool( $args );
+		}
+		if ( 'wp' === $name ) {
+			return '' === (string) ( $args['route'] ?? '' ) ? self::find_routes( (string) ( $args['search'] ?? '' ) ) : self::wp_rest( $args );
+		}
 		$tool = self::all()[ $name ] ?? null;
 		if ( null === $tool ) {
 			throw new RuntimeException( 'Unknown tool: ' . $name . '. Call tools/list.' );
@@ -1354,8 +1513,8 @@ final class Tools {
 		if ( 'GET' !== $method && ! Api::allows( 'admin' ) ) {
 			throw new RuntimeException( $method . ' requests need an admin key (this key may only read).' );
 		}
-		if ( str_starts_with( $route, '/sve/' ) ) {
-			throw new RuntimeException( 'Use the editor tools instead of the editor\'s own REST routes.' );
+		if ( ! self::route_allowed( $route ) ) {
+			throw new RuntimeException( 'That route is not reachable through the AI (editor admin API, MCP endpoint, application passwords).' );
 		}
 		$request = new \WP_REST_Request( $method, $route );
 		foreach ( (array) ( $a['params'] ?? array() ) as $key => $value ) {
@@ -1378,7 +1537,7 @@ final class Tools {
 		return array(
 			'status'  => $response->get_status(),
 			'headers' => array_intersect_key( $response->get_headers(), array_flip( array( 'X-WP-Total', 'X-WP-TotalPages' ) ) ),
-			'data'    => strlen( $json ) > 120000 ? array( 'truncated' => true, 'json' => substr( $json, 0, 120000 ) ) : $data,
+			'data'    => strlen( $json ) > 40000 ? array( 'truncated' => true, 'hint' => 'Too long: add _fields, per_page or a narrower route.', 'json' => substr( $json, 0, 40000 ) ) : $data,
 		);
 	}
 

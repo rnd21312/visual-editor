@@ -212,3 +212,5 @@ button, input, select, textarea { font: inherit; color: inherit; }
 @media (max-width: 1100px) {
   .ve-main { --ve-left: 260px; --ve-right: 280px; }
 }
+
+.ve-boot { display: grid; place-items: center; height: 100%; color: var(--ve-faint, #94a3b8); font-size: 13px; }

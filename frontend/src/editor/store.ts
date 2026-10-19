@@ -61,6 +61,7 @@ type State = {
   left: LeftTab;
   right: RightTab;
   modal: Modal | null;
+  previewReady: boolean;
   saving: 'idle' | 'saving' | 'saved' | 'error';
   past: Snapshot[];
   future: Snapshot[];
@@ -123,6 +124,7 @@ export const useStore = create<State & Actions>()((set, get) => ({
   left: 'layers',
   right: 'style',
   modal: null,
+  previewReady: false,
   saving: 'idle',
   past: [],
   future: [],

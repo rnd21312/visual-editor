@@ -28,7 +28,7 @@ final class Guide {
 			'read'  => 'READ-ONLY: you can look at everything but not change anything.',
 			'draft' => 'DRAFT level: your changes to styles/elements/SEO are saved as a draft that a person reviews and publishes in the editor; new pages/posts are created as drafts; published content can not be changed directly (layout changes become pending drafts).',
 			'live'  => 'LIVE level: your changes go live immediately (every change keeps a revision you can roll back with restore_revision). Markup is filtered (no scripts).',
-			'admin' => 'ADMIN level: full control like the site administrator — scripts, plugins, any setting, any WordPress/plugin REST route (wp_rest). Be careful and explain risky actions to the person first.',
+			'admin' => 'ADMIN level: full control like the site administrator — scripts, plugins, any setting, any WordPress/plugin REST route (`wp` tool). Be careful and explain risky actions to the person first.',
 		);
 
 		return implode(
@@ -39,7 +39,8 @@ final class Guide {
 				'This key: ' . ( $what[ $level ] ?? $what['draft'] ),
 				'Live editor: ' . ( $live ? 'an editor window is OPEN right now — inspect_element and screenshot return real computed styles and images, and show_in_editor can point things out to the person.' : 'no editor window is open — you see pages through server HTML (get_page_outline, find_elements, inspect_element). Ask the person to open the visual editor for screenshots and computed styles.' ),
 				'',
-				'START with get_site_overview, then get_guide (topic "all" once) for the builder syntax.',
+				'TOOLS: only three — `site` (start here; also lists every operation you may run), `do` (run an operation: {tool, args}; {tool, help:true} gives its schema) and `wp` (any REST route). Tool names below (set_style, edit_layout…) are operations for `do`.',
+				'START with `site` (add guide:"all" once for the builder syntax). Several WordPress sites may be connected to you: this one is ' . Api::site() . ' — never apply a change meant for another site here.',
 				'TO CHANGE SOMETHING THE PERSON POINTS AT ("make the Book now button rounded"): find_elements(url, text) → inspect_element(url, selector) → change it (set_style / set_content / edit_layout) → verify with inspect_element or screenshot.',
 				'TWO KINDS OF PAGES: (1) theme pages — change them with selector-based tools (set_style, set_content, insert_html, move_element, remove_element, hide_element, set_motion); (2) builder pages/templates (get_content shows builder.source) — edit their layout with edit_layout (by data-sid) or set_page_layout, and style elements with set_style using selector [data-sid="…"].',
 				'SCOPES of style/element changes: "page" (one URL), "template" (every product / post / category page rendered by that theme template — use instead of repeating per page), "site" (everywhere: header, footer, buttons…).',

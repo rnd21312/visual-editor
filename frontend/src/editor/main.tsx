@@ -7,17 +7,20 @@ import { App } from './App';
 import './styles.css';
 
 const cfg = readConfig();
-setLanguage(cfg.language);
-document.documentElement.dir = isRtl() ? 'rtl' : 'ltr';
 initStore(cfg);
 
-const root = createRoot(document.getElementById('sve-root')!);
-// Unsaved work of an earlier session is dropped before the preview loads.
-void useStore
+// Unsaved work of an earlier session is dropped before the preview loads. The language file and that request
+// run side by side, and the editor shell is on screen as soon as the language is known; only the preview
+// waits for the reset (see Canvas: previewReady).
+const reset = useStore
   .getState()
   .api.del('working')
   .catch(() => undefined)
-  .finally(() => {
-    root.render(<App />);
-    startLive();
-  });
+  .finally(() => useStore.setState({ previewReady: true }));
+
+void setLanguage(cfg.language).then(() => {
+  document.documentElement.dir = isRtl() ? 'rtl' : 'ltr';
+  createRoot(document.getElementById('sve-root')!).render(<App />);
+  startLive();
+  void reset;
+});

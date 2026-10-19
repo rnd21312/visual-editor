@@ -45,7 +45,7 @@ final class Server {
 							'prompts'   => array( 'listChanged' => false ),
 							'logging'   => new \stdClass(),
 						),
-						'serverInfo'      => array( 'name' => Api::server_name(), 'title' => 'Visual Editor — ' . get_bloginfo( 'name' ), 'version' => SVE_VERSION ),
+						'serverInfo'      => array( 'name' => Api::server_name(), 'title' => get_bloginfo( 'name' ) . ' (' . Api::site() . ')', 'version' => SVE_VERSION ),
 						'instructions'    => Guide::instructions(),
 					)
 				);
@@ -75,7 +75,7 @@ final class Server {
 	}
 
 	public static function is_write( array $message ): bool {
-		return 'tools/call' === ( $message['method'] ?? '' ) && Tools::is_write( (string) ( $message['params']['name'] ?? '' ) );
+		return 'tools/call' === ( $message['method'] ?? '' ) && Tools::is_write( (string) ( $message['params']['name'] ?? '' ), (array) ( $message['params']['arguments'] ?? array() ) );
 	}
 
 	/**
@@ -87,7 +87,11 @@ final class Server {
 			$result  = Tools::call( $name, $args );
 			$image   = (string) ( $result['_image'] ?? '' );
 			unset( $result['_image'] );
-			$content = array( array( 'type' => 'text', 'text' => (string) wp_json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) ) );
+			// Every answer says which site it came from, so an AI with several sites connected cannot mix them up.
+			if ( ! isset( $result['site'] ) ) {
+				$result = array( 'site' => Api::site() ) + $result;
+			}
+			$content = array( array( 'type' => 'text', 'text' => (string) wp_json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ) );
 			if ( '' !== $image && 1 === preg_match( '#^data:(image/[a-z]+);base64,(.+)$#s', $image, $m ) ) {
 				$content[] = array( 'type' => 'image', 'mimeType' => $m[1], 'data' => $m[2] );
 			}

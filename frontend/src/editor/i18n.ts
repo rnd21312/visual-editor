@@ -1,12 +1,11 @@
 // UI language: English source strings, translated when the user's WordPress language has a dictionary.
-import { fa } from './i18n-fa';
-
 let dict: Record<string, string> = {};
 let rtl = false;
 
-export const setLanguage = (locale: string): void => {
+/** The Persian dictionary (34 KB) is only fetched for Persian users. */
+export const setLanguage = async (locale: string): Promise<void> => {
   const lang = locale.toLowerCase();
-  dict = lang.startsWith('fa') ? fa : {};
+  dict = lang.startsWith('fa') ? (await import('./i18n-fa')).fa : {};
   rtl = lang.startsWith('fa') || lang.startsWith('ar') || lang.startsWith('he');
 };
 

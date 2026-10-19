@@ -36,6 +36,7 @@ export const Canvas = () => {
   const tplPreview = useStore((s) => s.tplPreview);
 
   const iframe = useRef<HTMLIFrameElement>(null);
+  const previewReady = useStore((s) => s.previewReady);
   const stage = useRef<HTMLDivElement>(null);
   const hoverEl = useRef<Element | null>(null);
   const [hover, setHover] = useState<{ box: Box; label: string } | null>(null);
@@ -270,7 +271,7 @@ export const Canvas = () => {
   return (
     <div className="ve-canvas" onMouseLeave={() => setHover(null)}>
       <div className={'ve-stage' + (width ? ' framed' : '')} ref={stage} style={{ width: width ? width : '100%' }}>
-        <iframe key={frameKey} ref={iframe} src={src} title={t('Preview')} onLoad={onLoad} />
+        {previewReady ? <iframe key={frameKey} ref={iframe} src={src} title={t('Preview')} onLoad={onLoad} /> : <div className="ve-boot">{t('Loading…')}</div>}
         <div className="ve-overlay">
           {!interact && hover && hover.box.width > 0 && (!selBox || hoverEl.current !== selected?.el) && (
             <div className="ve-hover" style={{ top: hover.box.top, left: hover.box.left, width: hover.box.width, height: hover.box.height }}>

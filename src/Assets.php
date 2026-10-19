@@ -46,6 +46,24 @@ final class Assets {
 	}
 
 	/**
+	 * Files of the chunks an entry imports statically (not the lazy ones).
+	 *
+	 * @param array<string, array<string, mixed>> $manifest Vite manifest.
+	 * @return string[]
+	 */
+	private static function imports( array $manifest, string $key ): array {
+		$files = array();
+		foreach ( (array) ( $manifest[ $key ]['imports'] ?? array() ) as $import ) {
+			if ( isset( $manifest[ $import ]['file'] ) ) {
+				$files[] = (string) $manifest[ $import ]['file'];
+				$files   = array_merge( $files, self::imports( $manifest, (string) $import ) );
+			}
+		}
+
+		return $files;
+	}
+
+	/**
 	 * @param array<string, array<string, mixed>> $manifest Vite manifest.
 	 * @param array<string, bool>                 $seen     Visited chunks.
 	 * @return string[]
@@ -106,6 +124,10 @@ window.__vite_plugin_react_preamble_installed__ = true;
 
 		foreach ( array_values( array_unique( self::css( $manifest, self::EDITOR ) ) ) as $css ) {
 			printf( '<link rel="stylesheet" href="%s">' . "\n", esc_url( SVE_URL . 'dist/' . $css ) );
+		}
+		// Start the shared chunks downloading in parallel instead of after the entry script has been parsed.
+		foreach ( array_unique( self::imports( $manifest, self::EDITOR ) ) as $file ) {
+			printf( '<link rel="modulepreload" href="%s">' . "\n", esc_url( SVE_URL . 'dist/' . $file ) );
 		}
 		printf( '<script type="module" src="%s"></script>' . "\n", esc_url( SVE_URL . 'dist/' . $chunk['file'] ) );
 	}
