@@ -141,6 +141,7 @@ const DraftModal = () => {
   };
   const preview = () => {
     if (!info?.doc) return;
+    if (useStore.getState().dirty() && !window.confirm(t('You have unsaved changes. Opening the AI draft replaces them. Continue?'))) return;
     // Load the proposal into the editor: review it in the preview, adjust, then publish normally.
     const draftDoc = info.doc;
     useStore.getState().setDoc(() => ({ ...draftDoc, rev: useStore.getState().base.rev }));

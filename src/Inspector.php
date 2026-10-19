@@ -73,6 +73,7 @@ final class Inspector {
 				array(
 					'timeout'     => 20,
 					'redirection' => 0,
+					'limit_response_size' => 3 * MB_IN_BYTES, // A page this large is not one to read whole.
 					'user-agent'  => 'VisualEditor/' . SVE_VERSION . ' (inspector)',
 					'sslverify'   => (bool) apply_filters( 'https_local_ssl_verify', false ),
 					'cookies'     => $cookies,
@@ -286,7 +287,7 @@ final class Inspector {
 	/**
 	 * @return array<string, mixed>|WP_Error
 	 */
-	public static function outline( string $url, int $max = 300, string $root = '', bool $as_user = false ) {
+	public static function outline( string $url, int $max = 300, string $root = '', bool $as_user = false, string $find = '' ) {
 		$page = self::load( $url, $as_user );
 		if ( is_wp_error( $page ) ) {
 			return $page;
@@ -308,7 +309,13 @@ final class Inspector {
 					$truncated = true;
 					return;
 				}
-				$nodes[] = self::describe( $child, $depth, $doc, $page['modern'], false );
+				$node = self::describe( $child, $depth, $doc, $page['modern'], false );
+				// Bare wrappers (no id, class, text or link) only add noise; their children are still walked.
+				if ( isset( $node['id'] ) || isset( $node['classes'] ) || isset( $node['text'] ) || isset( $node['href'] ) || isset( $node['src'] ) || isset( $node['data-sid'] ) || ! in_array( $node['tag'], array( 'div', 'span' ), true ) ) {
+					if ( '' === $find || false !== mb_stripos( (string) wp_json_encode( $node, JSON_UNESCAPED_UNICODE ), $find ) ) {
+						$nodes[] = $node;
+					}
+				}
 				if ( 'svg' !== strtolower( (string) $child->localName ) ) {
 					$walk( $child, $depth + 1 );
 				}

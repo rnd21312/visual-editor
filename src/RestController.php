@@ -506,7 +506,13 @@ final class RestController {
 			}
 			$limit = Api::throttle( Server::is_write( $message ) );
 			if ( null !== $limit ) {
-				return self::error_response( $limit );
+				if ( array() === $replies ) {
+					return self::error_response( $limit );
+				}
+				// Keep what was already answered; the limited message gets its own error.
+				$data      = (array) $limit->get_error_data();
+				$replies[] = array( 'jsonrpc' => '2.0', 'id' => $message['id'] ?? null, 'error' => array( 'code' => -32000, 'message' => $limit->get_error_message() . ' Retry in ' . (int) ( $data['retry_after'] ?? 60 ) . 's.' ) );
+				continue;
 			}
 			$reply = Server::handle( $message );
 			++$calls;

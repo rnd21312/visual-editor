@@ -31,6 +31,9 @@ final class Api {
 	/** Token the settings page's connection test sends: never a valid key. */
 	public const PROBE = 'sve_probe';
 
+	/** Usage stats live apart from the keys: touch() runs on every call and must never write a key back. */
+	public const USAGE = 'sve_api_usage';
+
 	public const READS_PER_MINUTE = 240;
 
 	public const WRITES_PER_MINUTE = 60;
@@ -51,10 +54,12 @@ final class Api {
 		$saved = get_option( self::OPTION, array() );
 		$saved = is_array( $saved ) ? $saved : array();
 
-		$keys = array();
+		$usage = get_option( self::USAGE, array() );
+		$usage = is_array( $usage ) ? $usage : array();
+		$keys  = array();
 		foreach ( (array) ( $saved['keys'] ?? array() ) as $key ) {
 			if ( is_array( $key ) && ! empty( $key['hash'] ) ) {
-				$keys[] = self::key_shape( $key );
+				$keys[] = self::key_shape( array_merge( $key, is_array( $usage[ $key['id'] ?? '' ] ?? null ) ? $usage[ $key['id'] ] : array() ) );
 			}
 		}
 		// v1 stored a single key at the top level.
@@ -134,6 +139,9 @@ final class Api {
 	 * @param array{enabled: bool, about: string, keys: array<int, array<string, mixed>>} $settings Settings.
 	 */
 	private static function write( array $settings ): void {
+		foreach ( $settings['keys'] as $i => $key ) {
+			unset( $settings['keys'][ $i ]['last_used'], $settings['keys'][ $i ]['calls'] );
+		}
 		update_option( self::OPTION, $settings, false );
 	}
 
@@ -242,6 +250,11 @@ final class Api {
 		$s         = self::settings();
 		$s['keys'] = array_values( array_filter( $s['keys'], static fn ( array $key ): bool => $key['id'] !== $id ) );
 		self::write( $s );
+		$usage = get_option( self::USAGE, array() );
+		if ( is_array( $usage ) && isset( $usage[ $id ] ) ) {
+			unset( $usage[ $id ] );
+			update_option( self::USAGE, $usage, false );
+		}
 	}
 
 	private static function hash( string $key ): string {
@@ -293,8 +306,8 @@ final class Api {
 				if ( hash_equals( $key['hash'], $hash ) ) {
 					self::$current = $key;
 					$user          = $key['user'] > 0 ? get_userdata( $key['user'] ) : false;
-					if ( ! $user ) {
-						return new WP_Error( 'sve_key_user', 'The user who created this key no longer exists. Create a new key.', array( 'status' => 403 ) );
+					if ( ! $user || ! user_can( $user, 'manage_options' ) ) {
+						return new WP_Error( 'sve_key_user', 'The user who created this key is no longer an administrator. Create a new key.', array( 'status' => 403 ) );
 					}
 					wp_set_current_user( $user->ID );
 					if ( 'admin' !== $key['level'] ) {
@@ -409,14 +422,13 @@ final class Api {
 		if ( null === self::$current || ! empty( self::$current['oauth'] ) ) {
 			return;
 		}
-		$s = self::settings();
-		foreach ( $s['keys'] as $i => $key ) {
-			if ( $key['id'] === self::$current['id'] ) {
-				$s['keys'][ $i ]['calls']    += $calls;
-				$s['keys'][ $i ]['last_used'] = time();
-				self::write( $s );
-				return;
-			}
-		}
+		$usage = get_option( self::USAGE, array() );
+		$usage = is_array( $usage ) ? $usage : array();
+		$id    = (string) self::$current['id'];
+		$usage[ $id ] = array(
+			'calls'     => (int) ( $usage[ $id ]['calls'] ?? 0 ) + $calls,
+			'last_used' => time(),
+		);
+		update_option( self::USAGE, $usage, false );
 	}
 }

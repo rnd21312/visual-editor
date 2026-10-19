@@ -77,7 +77,7 @@ final class PageKey {
 		$path = rawurldecode( $path );
 		if ( '' !== $home ) {
 			$decoded_home = rawurldecode( $home );
-			if ( str_starts_with( $path, $decoded_home ) ) {
+			if ( $path === $decoded_home || str_starts_with( $path, $decoded_home . '/' ) ) {
 				$path = substr( $path, strlen( $decoded_home ) );
 			}
 		}

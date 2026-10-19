@@ -55,6 +55,10 @@ final class Server {
 			case 'tools/list':
 				return $reply( array( 'tools' => Tools::listing() ) );
 			case 'tools/call':
+				if ( ! Tools::exists( (string) ( $params['name'] ?? '' ) ) ) {
+					return $fail( -32602, 'Unknown tool: ' . (string) ( $params['name'] ?? '' ) . '. Call tools/list.' );
+				}
+
 				return $reply( self::call( (string) ( $params['name'] ?? '' ), is_array( $params['arguments'] ?? null ) ? $params['arguments'] : array() ) );
 			case 'resources/list':
 				return $reply( array( 'resources' => self::resources() ) );

@@ -45,6 +45,10 @@ assert( Tools::is_write( 'wp', array( 'route' => '/wp/v2/posts', 'method' => 'po
 assert( ! Tools::is_write( 'do', array( 'tool' => 'get_page_outline', 'args' => array( 'url' => '/' ) ) ) );
 assert( Tools::is_write( 'do', array( 'tool' => 'set_style', 'args' => array() ) ) && ! Tools::is_write( 'do', array( 'tool' => 'set_style', 'help' => true ) ) );
 
+// A batch is a write when any step writes.
+assert( Tools::is_write( 'do', array( 'tool' => 'batch', 'args' => array( 'steps' => array( array( 'tool' => 'get_page_outline' ), array( 'tool' => 'set_style' ) ) ) ) ) );
+assert( ! Tools::is_write( 'do', array( 'tool' => 'batch', 'args' => array( 'steps' => array( array( 'tool' => 'get_page_outline' ) ) ) ) ) );
+
 // The AI can reach WordPress, but never this plugin's key management or application passwords.
 foreach ( array( '/sve/v1/admin/api/keys', 'sve/v1/mcp', '//sve//v1/admin/api', '/SVE/v1/admin/api', '/wp/v2/users/1/application-passwords', '/wp/v2/users/me/application-passwords/abc', '/wp/v2/users/%61pplication-passwords' ) as $path ) {
 	assert( ! Tools::route_allowed( $path ), $path );

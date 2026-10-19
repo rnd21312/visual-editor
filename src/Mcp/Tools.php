@@ -121,7 +121,7 @@ final class Tools {
 		$add( 'list_content', 'read', 'Find pages, posts, products, builder templates (type "sve_template") or any public post type.', self::obj( array( 'type' => self::str( 'Post type, e.g. page, post, product, sve_template' ), 'search' => self::str( 'Words' ), 'status' => self::str( 'publish, draft, pending, private' ), 'page' => self::int( 'Result page' ), 'per_page' => self::int( '1–100' ) ) ), static fn ( array $a ): array => Content::list_posts( $a ) );
 		$add( 'get_content', 'read', 'Everything about one page/post/product/template: fields, terms, meta, SEO, product data and — for builder content — builder.source and builder.outline (element ids for edit_layout).', self::obj( array( 'id' => self::int( 'Post id' ) ), array( 'id' ) ), array( self::class, 'get_content' ) );
 		$add( 'list_templates', 'read', 'Theme templates (single product, single post, archives, search, 404…) with a sample URL each, plus builder templates and header/footer parts.', self::obj( array() ), static fn (): array => array( 'theme_templates' => Templates::listing(), 'builder_templates' => Router::templates(), 'hint' => 'Use scope "template" with a theme template key to change every page it renders; create_template to replace it with a builder layout.' ) );
-		$add( 'get_page_outline', 'read', 'Structure of a page as visitors get it (saved edits applied): every element with a stable selector, tag, classes, text, links. Use root to zoom into one part.', self::obj( array( 'url' => self::str( 'Page URL or path' ), 'root' => self::str( 'Optional selector to start from' ), 'max_nodes' => self::int( 'Default 300, max 1500' ), 'as_user' => self::bool( 'Load as the key user (to see drafts/private pages)' ) ), array( 'url' ) ), array( self::class, 'outline' ) );
+		$add( 'get_page_outline', 'read', 'Structure of a page as visitors get it (saved edits applied): every element with a stable selector, tag, classes, text, links. Use root to zoom into one part.', self::obj( array( 'url' => self::str( 'Page URL or path' ), 'root' => self::str( 'Optional selector to start from' ), 'find' => self::str( 'Keep only lines containing this text' ), 'max_nodes' => self::int( 'Default 150, max 600' ), 'as_user' => self::bool( 'Load as the key user (to see drafts/private pages)' ) ), array( 'url' ) ), array( self::class, 'outline' ) );
 		$add( 'find_elements', 'read', 'Find elements by visible text, role (button, link, heading, image, input, section, form), tag or selector — e.g. text "Book now", role "button". Returns selectors, text, section context.', self::obj( array( 'url' => self::str( 'Page URL or path' ), 'text' => self::str( 'Visible text / label' ), 'role' => self::str( 'button | link | heading | image | input | section | form' ), 'tag' => self::str( 'Tag name' ), 'selector' => self::str( 'CSS selector' ), 'limit' => self::int( 'Max results (10)' ), 'as_user' => self::bool( 'Load as the key user' ) ), array( 'url' ) ), array( self::class, 'find' ) );
 		$add( 'inspect_element', 'read', 'Look closely at one element: markup, attributes, ancestors, children, the CSS rules that style it, editor changes on it — and, when the editor is open, computed styles, size/position and a screenshot of the element.', self::obj( array( 'url' => self::str( 'Page URL or path' ), 'selector' => self::str( 'CSS selector (from find_elements / get_page_outline)' ), 'device' => self::enum( array( 'desktop', 'tablet', 'mobile' ), 'Viewport for the live view' ), 'live' => self::bool( 'Use the open editor (default true)' ), 'screenshot' => self::bool( 'Include an image (default true)' ) ), array( 'url', 'selector' ) ), array( self::class, 'inspect' ) );
 		$add( 'screenshot', 'read', 'Picture of a page or one element on desktop, tablet or mobile (needs the editor open).', self::obj( array( 'url' => self::str( 'Page URL or path' ), 'selector' => self::str( 'Optional element' ), 'device' => self::enum( array( 'desktop', 'tablet', 'mobile' ), 'Viewport' ), 'full_page' => self::bool( 'Whole page instead of the first screen' ) ), array( 'url' ) ), array( self::class, 'screenshot' ) );
@@ -250,12 +250,29 @@ final class Tools {
 		return $out;
 	}
 
+	public static function exists( string $name ): bool {
+		return in_array( $name, self::FACADE, true ) || isset( self::all()[ $name ] );
+	}
+
 	public static function is_write( string $name, array $args = array() ): bool {
 		if ( 'wp' === $name ) {
 			return 'GET' !== strtoupper( (string) ( $args['method'] ?? 'GET' ) ) && '' !== (string) ( $args['route'] ?? '' );
 		}
 		if ( 'do' === $name ) {
-			return self::is_write( (string) ( $args['tool'] ?? '' ), (array) ( $args['args'] ?? array() ) ) && empty( $args['help'] );
+			if ( ! empty( $args['help'] ) ) {
+				return false;
+			}
+			if ( 'batch' === ( $args['tool'] ?? '' ) ) {
+				foreach ( (array) ( $args['args']['steps'] ?? array() ) as $step ) {
+					if ( is_array( $step ) && self::is_write( (string) ( $step['tool'] ?? '' ), (array) ( $step['args'] ?? array() ) ) ) {
+						return true;
+					}
+				}
+
+				return false;
+			}
+
+			return self::is_write( (string) ( $args['tool'] ?? '' ), (array) ( $args['args'] ?? array() ) );
 		}
 		$tool = self::all()[ $name ] ?? null;
 
@@ -316,7 +333,7 @@ final class Tools {
 	 * @return array<int, string>
 	 */
 	private static function operations(): array {
-		$out = array();
+		$out = array( 'batch — Several operations as one step (args.steps:[{tool,args}]): one revision, document rolled back if one fails' );
 		foreach ( self::all() as $tool ) {
 			if ( 'wp_rest' === $tool['name'] || ! Api::allows( $tool['level'] ) ) {
 				continue;
@@ -355,6 +372,9 @@ final class Tools {
 		if ( in_array( $name, self::FACADE, true ) || 'wp_rest' === $name ) {
 			throw new RuntimeException( 'Use the ' . ( 'wp_rest' === $name ? 'wp' : $name ) . ' tool directly.' );
 		}
+		if ( 'batch' === $name ) {
+			return self::batch( is_array( $a['args']['steps'] ?? null ) ? $a['args']['steps'] : array() );
+		}
 		$tool = self::all()[ $name ] ?? null;
 		if ( null === $tool ) {
 			throw new RuntimeException( 'Unknown operation "' . $name . '". `site` lists them.' );
@@ -364,6 +384,45 @@ final class Tools {
 		}
 
 		return self::call( $name, is_array( $a['args'] ?? null ) ? $a['args'] : array() );
+	}
+
+	/**
+	 * Several operations as one step: every step is checked first (known, allowed), then they run under one lock
+	 * and make ONE revision; if any fails, the editor document and the AI draft are put back. Writes to posts
+	 * and media are not rolled back, so keep those out of a batch you may need to undo.
+	 *
+	 * @param array<int, mixed> $steps [{tool, args}…]
+	 * @return array<string, mixed>
+	 */
+	private static function batch( array $steps ): array {
+		if ( array() === $steps || count( $steps ) > 25 ) {
+			throw new RuntimeException( 'batch needs args.steps: 1 to 25 items of {tool, args}.' );
+		}
+		foreach ( $steps as $i => $step ) {
+			$name = is_array( $step ) ? (string) ( $step['tool'] ?? '' ) : '';
+			$tool = self::all()[ $name ] ?? null;
+			if ( null === $tool || 'wp_rest' === $name ) {
+				throw new RuntimeException( 'Step ' . ( $i + 1 ) . ': unknown operation "' . $name . '". Nothing was applied.' );
+			}
+			if ( ! Api::allows( $tool['level'] ) ) {
+				throw new RuntimeException( 'Step ' . ( $i + 1 ) . ': ' . $name . ' needs a "' . $tool['level'] . '" key. Nothing was applied.' );
+			}
+		}
+
+		return Store::batch(
+			static function () use ( $steps ): array {
+				$results = array();
+				foreach ( $steps as $i => $step ) {
+					try {
+						$results[] = array( 'tool' => $step['tool'], 'result' => self::call( (string) $step['tool'], is_array( $step['args'] ?? null ) ? $step['args'] : array() ) );
+					} catch ( \Throwable $error ) {
+						throw new RuntimeException( 'Step ' . ( $i + 1 ) . ' (' . $step['tool'] . ') failed: ' . $error->getMessage() . '. Document changes were rolled back.', 0, $error );
+					}
+				}
+
+				return array( 'steps' => count( $results ), 'results' => $results );
+			}
+		);
 	}
 
 	/**
@@ -418,7 +477,7 @@ final class Tools {
 		if ( ! Api::allows( $tool['level'] ) ) {
 			throw new RuntimeException( 'This key is "' . Api::current_level() . '"; ' . $name . ' needs "' . $tool['level'] . '". An administrator can change the key level in the editor (Settings → AI access).' );
 		}
-		$result = ( $tool['run'] )( $args );
+		$result = ( $tool['run'] )( self::resolve_ids( $args ) );
 		if ( $result instanceof \WP_Error ) {
 			throw new RuntimeException( $result->get_error_message() );
 		}
@@ -673,7 +732,60 @@ final class Tools {
 	 * @return array<string, mixed>|\WP_Error
 	 */
 	public static function outline( array $a ) {
-		return Inspector::outline( self::url( $a ), max( 20, min( 1500, (int) ( $a['max_nodes'] ?? 300 ) ) ), (string) ( $a['root'] ?? '' ), ! empty( $a['as_user'] ) );
+		$out = Inspector::outline( self::url( $a ), max( 20, min( 600, (int) ( $a['max_nodes'] ?? 150 ) ) ), (string) ( $a['root'] ?? '' ), ! empty( $a['as_user'] ), (string) ( $a['find'] ?? '' ) );
+		if ( is_wp_error( $out ) ) {
+			return $out;
+		}
+		// One short line per element ("n12 h2.title "Tours"") instead of an object with a long selector: roughly
+		// a tenth of the tokens. The ids stand for the selectors, valid for ten minutes, in set_style & co.
+		$ids   = array();
+		$lines = array();
+		foreach ( $out['nodes'] as $i => $node ) {
+			$id         = 'n' . ( $i + 1 );
+			$ids[ $id ] = $node['selector'];
+			$attrs      = '';
+			foreach ( array( 'id' => '#', 'role' => ' role=', 'href' => ' href=', 'src' => ' src=', 'alt' => ' alt=', 'type' => ' type=', 'placeholder' => ' ph=' ) as $name => $glue ) {
+				if ( isset( $node[ $name ] ) ) {
+					$attrs .= $glue . mb_substr( (string) $node[ $name ], 0, 80 );
+				}
+			}
+			$classes = isset( $node['classes'] ) ? '.' . implode( '.', array_slice( preg_split( '/\s+/', (string) $node['classes'] ) ?: array(), 0, 3 ) ) : '';
+			$lines[] = str_repeat( ' ', min( 12, (int) ( $node['depth'] ?? 0 ) ) ) . $id . ' ' . $node['tag'] . $classes . $attrs . ( isset( $node['text'] ) ? ' "' . mb_substr( (string) $node['text'], 0, 60 ) . '"' : '' ) . ( isset( $node['data-sid'] ) ? ' sid=' . $node['data-sid'] : '' );
+		}
+		set_transient( self::ids_key(), $ids, 10 * MINUTE_IN_SECONDS );
+
+		return array(
+			'url'       => $out['url'],
+			'title'     => $out['title'],
+			'outline'   => implode( "\n", $lines ),
+			'truncated' => $out['truncated'],
+			'note'      => $out['truncated'] ? 'Truncated: pass root (an id like n12 or a selector) to zoom in, find to filter, or a larger max_nodes.' : 'Use the ids (n12) as `selector` in other operations.',
+		);
+	}
+
+	private static function ids_key(): string {
+		return 'sve_ids_' . md5( (string) ( Api::current_key()['id'] ?? 'x' ) );
+	}
+
+	/**
+	 * Replaces short outline ids ("n12") in selector arguments with the selectors they stand for.
+	 *
+	 * @param array<string, mixed> $args Arguments.
+	 * @return array<string, mixed>
+	 */
+	private static function resolve_ids( array $args ): array {
+		$map = null;
+		foreach ( array( 'selector', 'root', 'target' ) as $name ) {
+			if ( isset( $args[ $name ] ) && is_string( $args[ $name ] ) && 1 === preg_match( '/^n\d{1,4}$/', $args[ $name ] ) ) {
+				$map ??= get_transient( self::ids_key() );
+				if ( ! is_array( $map ) || ! isset( $map[ $args[ $name ] ] ) ) {
+					throw new RuntimeException( 'Unknown or expired id "' . $args[ $name ] . '". Call get_page_outline again.' );
+				}
+				$args[ $name ] = $map[ $args[ $name ] ];
+			}
+		}
+
+		return $args;
 	}
 
 	/**
@@ -1447,7 +1559,10 @@ final class Tools {
 		if ( ! empty( $a['post_id'] ) && empty( $a['url'] ) && empty( $a['template'] ) ) {
 			return self::save_content( array( 'id' => (int) $a['post_id'], 'seo' => $fields ), false );
 		}
-		if ( ! empty( $a['template'] ) ) {
+		if ( isset( $a['template'] ) ) {
+			if ( '' === Sanitizer::tpl( $a['template'] ) ) {
+				throw new RuntimeException( 'template is empty. Use a template key from list_templates, or url / post_id.' );
+			}
 			$key = 'tpl:' . Sanitizer::tpl( $a['template'] );
 		} else {
 			$page = PageKey::for_url( (string) ( $a['url'] ?? '' ) );

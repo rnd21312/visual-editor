@@ -18,7 +18,12 @@ Merges the Suntourz visual builder into this plugin.
 - `wp` can search routes and never reaches the plugin's admin API or application passwords; answers are capped at 40 KB.
 - Faster editor start: shell renders before the preview, Persian dictionary loads only for Persian users, shared chunks are preloaded.
 
-### Fixed
+### Fixed (carried over from 0.x)
+- Usage stats are stored apart from the keys, so a late request can no longer bring a revoked key back; a key stops working when its user is no longer an administrator.
+- `batch` runs several operations as one step: one lock, one revision, document rolled back if one fails. The lock is re-entrant.
+- `get_page_outline` returns one short line per element with ids (`n12`) accepted as selectors (about a tenth of the tokens), `find` filters, bare wrappers are hidden. Page fetches are capped at 3 MB.
+- A rate-limited message in a batch keeps the earlier replies; unknown tools answer -32602; an empty template key is refused by `set_seo`; a site folder such as `/shop` no longer eats the start of `/shopping/`.
+- The editor asks before an AI draft replaces unsaved work.
 - Writes to the document are serialised with a database lock.
 - CSS escapes can no longer smuggle `@import`, `url(javascript:)` or `expression()` past the filter.
 - Custom CSS using `selector > child` on a selector list now applies to every selector of the list.

@@ -33,6 +33,45 @@ final class Store {
 	/** @var array<string, mixed>|null */
 	private static ?array $cache = null;
 
+	/** @var array<string, true> Named locks this request holds. */
+	private static array $held = array();
+
+	/** Inside a batch: only the first write archives a revision, so a batch is one step to undo. */
+	private static bool $batching = false;
+
+	private static bool $archived = false;
+
+	/**
+	 * Runs several writes as one: one lock, one revision, and if any of them fails the document and the AI draft
+	 * go back to how they were (writes to posts and media are not part of this).
+	 *
+	 * @param callable(): mixed $work Work to run.
+	 */
+	public static function batch( callable $work ): mixed {
+		return self::locked(
+			static function () use ( $work ): mixed {
+				$option = get_option( self::OPTION, null );
+				$draft  = get_option( self::DRAFT, null );
+				self::$batching = true;
+				self::$archived = false;
+				$revisions      = self::revisions_raw();
+				try {
+					return $work();
+				} catch ( \Throwable $error ) {
+					null === $option ? delete_option( self::OPTION ) : update_option( self::OPTION, $option, false );
+					null === $draft ? delete_option( self::DRAFT ) : update_option( self::DRAFT, $draft, false );
+					update_option( self::REVISIONS, $revisions, false );
+					self::$cache = null;
+					Cache::purge();
+					throw $error;
+				} finally {
+					self::$batching = false;
+					self::$archived = false;
+				}
+			}
+		);
+	}
+
 	/** @var array<string, mixed>|null Unsaved document of the editor, used while it previews the site. */
 	private static ?array $working = null;
 
@@ -164,10 +203,14 @@ final class Store {
 	public static function locked( callable $work, string $lock = 'sve_document' ): mixed {
 		global $wpdb;
 		$name = $wpdb->prefix . $lock;
+		if ( isset( self::$held[ $name ] ) ) {
+			return $work(); // Already inside this lock (a batch): GET_LOCK is not re-entrant on every MySQL.
+		}
 		// ponytail: MySQL named lock, fine for one database server; swap for a row lock if the site ever shards.
 		if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 10)', $name ) ) ) {
 			throw new \RuntimeException( 'The document is busy. Try again in a moment.' );
 		}
+		self::$held[ $name ] = true;
 		try {
 			// Another request may have written since this one cached the options.
 			foreach ( array( self::OPTION, self::DRAFT, self::REVISIONS, OAuth::OPTION, 'notoptions' ) as $option ) {
@@ -177,6 +220,7 @@ final class Store {
 
 			return $work();
 		} finally {
+			unset( self::$held[ $name ] );
 			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $name ) );
 		}
 	}
@@ -187,7 +231,8 @@ final class Store {
 	 */
 	private static function store_unlocked( array $doc, string $actor, string $label ): array {
 		$previous = get_option( self::OPTION, null );
-		if ( is_array( $previous ) && array() !== $previous ) {
+		if ( is_array( $previous ) && array() !== $previous && ! self::$archived ) {
+			self::$archived = self::$batching;
 			$revisions   = self::revisions_raw();
 			$revisions[] = array(
 				'id'    => Sanitizer::new_id(),
