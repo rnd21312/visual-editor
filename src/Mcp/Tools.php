@@ -335,11 +335,11 @@ final class Tools {
 	private static function operations(): array {
 		$out = array( 'batch — Several operations as one step (args.steps:[{tool,args}]): one revision, document rolled back if one fails' );
 		foreach ( self::all() as $tool ) {
-			if ( 'wp_rest' === $tool['name'] || ! Api::allows( $tool['level'] ) ) {
+			if ( in_array( $tool['name'], array( 'wp_rest', 'get_site_overview', 'get_guide' ), true ) || ! Api::allows( $tool['level'] ) ) {
 				continue;
 			}
 			$first = (string) preg_replace( '/(?<=[.!?])\s.*$/s', '', $tool['description'] );
-			$out[] = $tool['name'] . ' — ' . ( mb_strlen( $first ) > 110 ? mb_substr( $first, 0, 107 ) . '…' : $first );
+			$out[] = $tool['name'] . ' — ' . ( mb_strlen( $first ) > 72 ? mb_substr( $first, 0, 69 ) . '…' : $first );
 		}
 
 		return $out;
@@ -357,6 +357,7 @@ final class Tools {
 		if ( ! empty( $a['guide'] ) ) {
 			$out['guide'] = Guide::text( (string) $a['guide'] );
 		}
+		unset( $out['next'] );
 		$out['operations'] = self::operations();
 		$out['how']        = 'do{tool,args}; do{tool,help:true} shows the schema. Sites are told apart by site.url.';
 
@@ -475,7 +476,7 @@ final class Tools {
 			throw new RuntimeException( 'Unknown tool: ' . $name . '. Call tools/list.' );
 		}
 		if ( ! Api::allows( $tool['level'] ) ) {
-			throw new RuntimeException( 'This key is "' . Api::current_level() . '"; ' . $name . ' needs "' . $tool['level'] . '". An administrator can change the key level in the editor (Settings → AI access).' );
+			throw new RuntimeException( 'This key is "' . Api::current_level() . '"; ' . $name . ' needs "' . $tool['level'] . '". An administrator can change the key level on the AI (MCP) page of the dashboard.' );
 		}
 		$result = ( $tool['run'] )( self::resolve_ids( $args ) );
 		if ( $result instanceof \WP_Error ) {
@@ -779,7 +780,7 @@ final class Tools {
 			if ( isset( $args[ $name ] ) && is_string( $args[ $name ] ) && 1 === preg_match( '/^n\d{1,4}$/', $args[ $name ] ) ) {
 				$map ??= get_transient( self::ids_key() );
 				if ( ! is_array( $map ) || ! isset( $map[ $args[ $name ] ] ) ) {
-					throw new RuntimeException( 'Unknown or expired id "' . $args[ $name ] . '". Call get_page_outline again.' );
+					throw new RuntimeException( 'Unknown or expired id "' . $args[ $name ] . '". Call get_page_outline again' );
 				}
 				$args[ $name ] = $map[ $args[ $name ] ];
 			}

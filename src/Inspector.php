@@ -300,7 +300,7 @@ final class Inspector {
 
 		$nodes     = array();
 		$truncated = false;
-		$walk      = static function ( object $el, int $depth ) use ( &$walk, &$nodes, &$truncated, $max, $doc, $page ): void {
+		$walk      = static function ( object $el, int $depth ) use ( &$walk, &$nodes, &$truncated, $max, $doc, $page, $find ): void {
 			foreach ( $el->childNodes as $child ) {
 				if ( 1 !== $child->nodeType || in_array( strtolower( (string) $child->localName ), self::SKIP, true ) ) {
 					continue;

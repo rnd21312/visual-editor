@@ -33,6 +33,9 @@ namespace {
 
 	$wpdb = new class() {
 		public string $prefix = 'wp_';
+		public function suppress_errors( bool $suppress = true ): bool {
+			return false;
+		}
 		public function prepare( string $query, mixed ...$args ): string {
 			return $query;
 		}

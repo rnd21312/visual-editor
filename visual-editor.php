@@ -26,7 +26,7 @@ define( 'SVE_URL', plugin_dir_url( __FILE__ ) );
 // Zero-dependency PSR-4 autoloader so the zip works without Composer.
 spl_autoload_register(
 	static function ( string $class_name ): void {
-		$prefix = 'Suntourz\\VisualEditor\\';
+		$prefix = 'VisualEditor\\';
 		if ( 0 !== strpos( $class_name, $prefix ) ) {
 			return;
 		}

@@ -73,13 +73,13 @@ export const AiPanel = () => {
             <input type="checkbox" checked={status.enabled} onChange={async (e) => setStatus(await api.put<ApiStatus>('api', { enabled: e.target.checked }))} /> {t('AI access enabled')}
           </label>
           {status.keys.map((k) => (
-            <div key={k.id} className="ve-item" style={{ cursor: 'default' }}>
+            <div key={k.id} className="ve-item" style={{ cursor: 'default', flexWrap: 'wrap' }}>
               <KeyRound size={14} />
               <span style={{ display: 'grid', minWidth: 0 }}>
                 <span className="t">{k.label} <span className="ve-faint">{k.hint}</span></span>
                 <span className="ve-faint">{k.user} · {k.calls} {t('calls')}{k.lastUsed ? ' · ' + new Date(k.lastUsed * 1000).toLocaleString() : ''}</span>
               </span>
-              <select className="ve-select" style={{ width: 120, marginInlineStart: 'auto' }} value={k.level} onChange={async (e) => setStatus(await api.put<ApiStatus>(`api/keys/${k.id}`, { level: e.target.value }))}>
+              <select className="ve-select" style={{ width: 'auto', minWidth: 96, marginInlineStart: 'auto' }} value={k.level} onChange={async (e) => setStatus(await api.put<ApiStatus>(`api/keys/${k.id}`, { level: e.target.value }))}>
                 {LEVELS.map((l) => (
                   <option key={l.value} value={l.value}>{t(l.label)}</option>
                 ))}

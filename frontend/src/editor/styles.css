@@ -214,3 +214,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 .ve-boot { display: grid; place-items: center; height: 100%; color: var(--ve-faint, #94a3b8); font-size: 13px; }
+
+/* Narrow side panels: wrap instead of scrolling sideways. */
+.ve-scroll { overflow-x: hidden; }
+.ve-chip { white-space: normal; }

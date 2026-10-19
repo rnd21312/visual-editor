@@ -18,6 +18,12 @@ Merges the Suntourz visual builder into this plugin.
 - `wp` can search routes and never reaches the plugin's admin API or application passwords; answers are capped at 40 KB.
 - Faster editor start: shell renders before the preview, Persian dictionary loads only for Persian users, shared chunks are preloaded.
 
+### Fixed (found by running it in a real WordPress)
+- The plugin failed to activate: the autoloader still used the old namespace prefix. `tests/boot-check.php` now guards it.
+- Databases without named locks (SQLite) no longer make every write fail with "document is busy".
+- `get_page_outline` crashed on every call (undefined filter variable).
+- Side panels wrap instead of scrolling sideways.
+
 ### Fixed (carried over from 0.x)
 - Usage stats are stored apart from the keys, so a late request can no longer bring a revoked key back; a key stops working when its user is no longer an administrator.
 - `batch` runs several operations as one step: one lock, one revision, document rolled back if one fails. The lock is re-entrant.

@@ -207,9 +207,13 @@ final class Store {
 			return $work(); // Already inside this lock (a batch): GET_LOCK is not re-entrant on every MySQL.
 		}
 		// ponytail: MySQL named lock, fine for one database server; swap for a row lock if the site ever shards.
-		if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 10)', $name ) ) ) {
+		$quiet = $wpdb->suppress_errors( true );
+		$got   = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 10)', $name ) );
+		$wpdb->suppress_errors( $quiet );
+		if ( '0' === (string) $got ) {
 			throw new \RuntimeException( 'The document is busy. Try again in a moment.' );
 		}
+		$locked = '1' === (string) $got; // null: this database has no named locks (SQLite): carry on without.
 		self::$held[ $name ] = true;
 		try {
 			// Another request may have written since this one cached the options.
@@ -221,7 +225,9 @@ final class Store {
 			return $work();
 		} finally {
 			unset( self::$held[ $name ] );
-			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $name ) );
+			if ( $locked ) {
+				$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $name ) );
+			}
 		}
 	}
 

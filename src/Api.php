@@ -296,7 +296,7 @@ final class Api {
 	public static function authenticate( WP_REST_Request $request ) {
 		$settings = self::settings();
 		if ( ! $settings['enabled'] || array() === $settings['keys'] ) {
-			return new WP_Error( 'sve_api_disabled', 'The AI API is switched off. Turn it on in the visual editor (Settings → AI access).', array( 'status' => 403 ) );
+			return new WP_Error( 'sve_api_disabled', 'The AI API is switched off. Turn it on in the dashboard (AI (MCP) page).', array( 'status' => 403 ) );
 		}
 
 		$token = self::token( $request );
