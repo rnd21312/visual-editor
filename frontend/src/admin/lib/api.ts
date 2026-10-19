@@ -26,7 +26,7 @@ export const readConfig = <T = AdminConfig>(id: string): T => {
   return JSON.parse(node.textContent) as T;
 };
 
-/** Config printed by the Suntourz menu pages (Bookings, Settings). */
+/** Config printed by the admin menu pages. */
 export type ShellConfig = {
   restUrl: string;
   nonce: string;

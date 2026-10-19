@@ -3,12 +3,12 @@
  * REST API of the visual editor: the document, the page finder, API-key settings, AI drafts and revisions
  * (all for people who may use the editor), plus the key-protected MCP endpoint for AI assistants.
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
 
-namespace Suntourz\VisualEditor;
+namespace VisualEditor;
 
 use WP_Error;
 use WP_REST_Request;
@@ -103,7 +103,7 @@ final class RestController {
 	public function save( WP_REST_Request $request ) {
 		$body = $request->get_json_params();
 		if ( ! is_array( $body ) ) {
-			return new WP_Error( 'sve_bad_request', __( 'Invalid request body.', 'suntourz-visual-editor' ), array( 'status' => 400 ) );
+			return new WP_Error( 'sve_bad_request', __( 'Invalid request body.', 'visual-editor' ), array( 'status' => 400 ) );
 		}
 
 		return new WP_REST_Response( $this->edits->save( $body ) );
@@ -127,7 +127,7 @@ final class RestController {
 	public function restore( WP_REST_Request $request ) {
 		$doc = $this->edits->restore( (int) $request['id'] );
 
-		return null === $doc ? new WP_Error( 'sve_no_revision', __( 'That version no longer exists.', 'suntourz-visual-editor' ), array( 'status' => 404 ) ) : new WP_REST_Response( $doc );
+		return null === $doc ? new WP_Error( 'sve_no_revision', __( 'That version no longer exists.', 'visual-editor' ), array( 'status' => 404 ) ) : new WP_REST_Response( $doc );
 	}
 
 	public function configure_api( WP_REST_Request $request ): WP_REST_Response {

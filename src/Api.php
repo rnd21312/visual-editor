@@ -4,12 +4,12 @@
  * call is rate limited per minute and per day, bad keys are throttled per IP, and what the key may do is
  * chosen by an administrator: read only, propose changes for approval (default), or edit live.
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
 
-namespace Suntourz\VisualEditor;
+namespace VisualEditor;
 
 use WP_Error;
 use WP_REST_Request;

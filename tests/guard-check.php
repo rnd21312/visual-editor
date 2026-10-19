@@ -2,7 +2,7 @@
 /**
  * Self-check for Guard and Compiler (CSS the AI can write). Run: php -d zend.assertions=1 -d assert.exception=1 tests/guard-check.php
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
@@ -12,9 +12,9 @@ require __DIR__ . '/../src/Guard.php';
 require __DIR__ . '/../src/Compiler.php';
 require __DIR__ . '/../src/Mcp.php';
 
-use Suntourz\VisualEditor\Compiler;
-use Suntourz\VisualEditor\Guard;
-use Suntourz\VisualEditor\Mcp;
+use VisualEditor\Compiler;
+use VisualEditor\Guard;
+use VisualEditor\Mcp;
 
 // Selectors: BEM modifiers are fine, comment and HTML-comment closers are not.
 assert( '.btn--primary' === Guard::selector( '.btn--primary' ) );

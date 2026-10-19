@@ -3,12 +3,12 @@
  * Which theme template renders a request. Single products, blog posts, category archives and so on are one
  * template for many URLs: edits made there are saved once for the template instead of once per URL.
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
 
-namespace Suntourz\VisualEditor;
+namespace VisualEditor;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -28,16 +28,16 @@ final class Templates {
 		);
 
 		if ( is_404() ) {
-			return $info( '404', __( '404 page', 'suntourz-visual-editor' ), true );
+			return $info( '404', __( '404 page', 'visual-editor' ), true );
 		}
 		if ( is_search() ) {
-			return $info( 'search', __( 'Search results', 'suntourz-visual-editor' ), true );
+			return $info( 'search', __( 'Search results', 'visual-editor' ), true );
 		}
 		if ( is_front_page() ) {
-			return $info( 'front', __( 'Front page', 'suntourz-visual-editor' ), false );
+			return $info( 'front', __( 'Front page', 'visual-editor' ), false );
 		}
 		if ( is_home() ) {
-			return $info( 'blog-index', __( 'Blog index', 'suntourz-visual-editor' ), true );
+			return $info( 'blog-index', __( 'Blog index', 'visual-editor' ), true );
 		}
 
 		if ( is_singular() ) {
@@ -45,36 +45,36 @@ final class Templates {
 			if ( 'page' === $type ) {
 				$custom = (string) get_page_template_slug();
 
-				return $info( '' !== $custom ? 'page-template:' . $custom : 'page-default', __( 'Page', 'suntourz-visual-editor' ), false );
+				return $info( '' !== $custom ? 'page-template:' . $custom : 'page-default', __( 'Page', 'visual-editor' ), false );
 			}
 			$object = get_post_type_object( $type );
 			$name   = $object ? (string) $object->labels->singular_name : $type;
 			$counts = (array) wp_count_posts( $type );
 
-			return $info( 'single:' . $type, sprintf( /* translators: %s: post type name, e.g. Product */ __( 'Single %s template', 'suntourz-visual-editor' ), $name ), true, (int) ( $counts['publish'] ?? 0 ) );
+			return $info( 'single:' . $type, sprintf( /* translators: %s: post type name, e.g. Product */ __( 'Single %s template', 'visual-editor' ), $name ), true, (int) ( $counts['publish'] ?? 0 ) );
 		}
 
 		if ( is_post_type_archive() ) {
 			$type = (string) get_query_var( 'post_type' );
 			$type = '' !== $type ? $type : 'post';
 
-			return $info( 'archive:' . $type, sprintf( /* translators: %s: post type name */ __( '%s archive template', 'suntourz-visual-editor' ), $type ), true );
+			return $info( 'archive:' . $type, sprintf( /* translators: %s: post type name */ __( '%s archive template', 'visual-editor' ), $type ), true );
 		}
 		if ( is_tax() || is_category() || is_tag() ) {
 			$term     = get_queried_object();
 			$taxonomy = $term instanceof \WP_Term ? $term->taxonomy : 'category';
 			$count    = $term instanceof \WP_Term ? (int) wp_count_terms( array( 'taxonomy' => $taxonomy, 'hide_empty' => true ) ) : 0;
 
-			return $info( 'tax:' . $taxonomy, sprintf( /* translators: %s: taxonomy name */ __( '%s archive template', 'suntourz-visual-editor' ), $taxonomy ), true, $count );
+			return $info( 'tax:' . $taxonomy, sprintf( /* translators: %s: taxonomy name */ __( '%s archive template', 'visual-editor' ), $taxonomy ), true, $count );
 		}
 		if ( is_author() ) {
-			return $info( 'author', __( 'Author archive', 'suntourz-visual-editor' ), true );
+			return $info( 'author', __( 'Author archive', 'visual-editor' ), true );
 		}
 		if ( is_date() ) {
-			return $info( 'date', __( 'Date archive', 'suntourz-visual-editor' ), true );
+			return $info( 'date', __( 'Date archive', 'visual-editor' ), true );
 		}
 
-		return $info( 'other', __( 'Other', 'suntourz-visual-editor' ), false );
+		return $info( 'other', __( 'Other', 'visual-editor' ), false );
 	}
 
 	/**
@@ -98,7 +98,7 @@ final class Templates {
 			$counts = (array) wp_count_posts( $type );
 			$out[]  = array(
 				'key'   => 'single:' . $type,
-				'label' => sprintf( /* translators: %s: post type name */ __( 'Single %s template', 'suntourz-visual-editor' ), (string) $object->labels->singular_name ),
+				'label' => sprintf( /* translators: %s: post type name */ __( 'Single %s template', 'visual-editor' ), (string) $object->labels->singular_name ),
 				'url'   => (string) get_permalink( $latest[0] ),
 				'count' => (int) ( $counts['publish'] ?? 0 ),
 				'thumb' => (string) get_the_post_thumbnail_url( $latest[0], 'medium' ),
@@ -109,7 +109,7 @@ final class Templates {
 			if ( $archive ) {
 				$out[] = array(
 					'key'   => 'archive:' . $type,
-					'label' => sprintf( /* translators: %s: post type name */ __( '%s archive template', 'suntourz-visual-editor' ), (string) $object->labels->name ),
+					'label' => sprintf( /* translators: %s: post type name */ __( '%s archive template', 'visual-editor' ), (string) $object->labels->name ),
 					'url'   => (string) $archive,
 					'count' => 0,
 					'thumb' => '',
@@ -127,7 +127,7 @@ final class Templates {
 			if ( is_string( $link ) ) {
 				$out[] = array(
 					'key'   => 'tax:' . $taxonomy->name,
-					'label' => sprintf( /* translators: %s: taxonomy name */ __( '%s archive template', 'suntourz-visual-editor' ), (string) $taxonomy->labels->singular_name ),
+					'label' => sprintf( /* translators: %s: taxonomy name */ __( '%s archive template', 'visual-editor' ), (string) $taxonomy->labels->singular_name ),
 					'url'   => $link,
 					'count' => (int) wp_count_terms( array( 'taxonomy' => $taxonomy->name, 'hide_empty' => true ) ),
 					'thumb' => '',
@@ -136,8 +136,8 @@ final class Templates {
 			}
 		}
 
-		$out[] = array( 'key' => 'search', 'label' => __( 'Search results', 'suntourz-visual-editor' ), 'url' => add_query_arg( 's', 'a', home_url( '/' ) ), 'count' => 0, 'thumb' => '', 'type' => 'other' );
-		$out[] = array( 'key' => '404', 'label' => __( '404 page', 'suntourz-visual-editor' ), 'url' => home_url( '/sve-preview-404/' ), 'count' => 0, 'thumb' => '', 'type' => 'other' );
+		$out[] = array( 'key' => 'search', 'label' => __( 'Search results', 'visual-editor' ), 'url' => add_query_arg( 's', 'a', home_url( '/' ) ), 'count' => 0, 'thumb' => '', 'type' => 'other' );
+		$out[] = array( 'key' => '404', 'label' => __( '404 page', 'visual-editor' ), 'url' => home_url( '/sve-preview-404/' ), 'count' => 0, 'thumb' => '', 'type' => 'other' );
 
 		return $out;
 	}

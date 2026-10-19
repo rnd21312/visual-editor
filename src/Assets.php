@@ -3,12 +3,12 @@
  * Locates the built editor and runtime files (frontend/vite.editor.config.ts → dist/).
  * Dev mode: define( 'SVE_VITE_DEV', true ) loads the editor from the Vite dev server (http://localhost:5175).
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
 
-namespace Suntourz\VisualEditor;
+namespace VisualEditor;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -97,7 +97,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
 		$manifest = self::manifest();
 		$chunk    = $manifest[ self::EDITOR ] ?? null;
 		if ( null === $chunk ) {
-			echo '<p style="padding:24px;font:14px system-ui">' . esc_html__( 'The editor files are missing. Run "npm run build" in the frontend folder.', 'suntourz-visual-editor' ) . '</p>';
+			echo '<p style="padding:24px;font:14px system-ui">' . esc_html__( 'The editor files are missing. Run "npm run build" in the frontend folder.', 'visual-editor' ) . '</p>';
 			return;
 		}
 

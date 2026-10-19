@@ -7,12 +7,12 @@
  * Writes follow the key's level: read-only, "draft" (proposed changes wait for an administrator's approval in
  * the editor — the default) or "live" (applied at once, with a revision to roll back to).
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
 
-namespace Suntourz\VisualEditor;
+namespace VisualEditor;
 
 defined( 'ABSPATH' ) || exit;
 

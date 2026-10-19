@@ -2,7 +2,7 @@
 /**
  * Self-check for VisualEdits::rebase (the AI draft merge). Run: php tests/rebase-check.php
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
@@ -10,7 +10,7 @@ declare(strict_types=1);
 define( 'ABSPATH', __DIR__ );
 require __DIR__ . '/../src/VisualEdits.php';
 
-use Suntourz\VisualEditor\VisualEdits;
+use VisualEditor\VisualEdits;
 
 $item = static fn ( string $id, string $sel ): array => array( 'id' => $id, 'sel' => $sel );
 

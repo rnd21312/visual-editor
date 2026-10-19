@@ -4,12 +4,12 @@
  * it, so a tool can point at "the second section's heading" exactly. Built from the page's server-rendered
  * HTML (pages that only exist after JavaScript runs show their fallback markup).
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
 
-namespace Suntourz\VisualEditor;
+namespace VisualEditor;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -37,7 +37,7 @@ final class Outline {
 				'timeout'             => 10,
 				'redirection'         => 3,
 				'limit_response_size' => 4 * MB_IN_BYTES,
-				'user-agent'          => 'SuntourzVisualEditor/' . SVE_VERSION,
+				'user-agent'          => 'VisualEditor/' . SVE_VERSION,
 				'sslverify'           => (bool) apply_filters( 'https_local_ssl_verify', false ),
 			)
 		);

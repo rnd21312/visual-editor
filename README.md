@@ -1,4 +1,4 @@
-# Suntourz Visual Editor
+# Visual Editor
 
 > A click-to-edit visual editor for **any** WordPress theme. Inspect every element, change text, styles and HTML, move and add elements, save components, manage SEO — and let an AI assistant do it over MCP. No theme files touched.
 
@@ -7,7 +7,7 @@
 ![WordPress 6.5+](https://img.shields.io/badge/WordPress-6.5%2B-21759b)
 ![PHP 8.1+](https://img.shields.io/badge/PHP-8.1%2B-777bb4)
 
-![Suntourz Visual Editor — selecting an element on a live page](docs/images/preview.png)
+![Visual Editor — selecting an element on a live page](docs/images/preview.png)
 
 The editor loads your **real, live site** in a same-origin iframe and works like browser dev tools with a *Save* button: hover to see the box, click to select, then edit. It is not a box-based page builder — it edits the page you already have, tag by tag (even the `<head>`), and stores the result as a small, portable document.
 

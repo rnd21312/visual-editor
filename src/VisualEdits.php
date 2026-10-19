@@ -2,17 +2,17 @@
 /**
  * Visual editor storage + public output.
  *
- * The editor (Suntourz → Visual editor) saves one document: global CSS plus a list of edits, each
+ * The editor saves one document: global CSS plus a list of edits, each
  * bound to a CSS selector and scoped to one page or the whole site. The editor compiles every edit to
  * CSS before saving; this class only validates it, stores it in one option and prints the part that
  * belongs to the current page (CSS in <head>, text/HTML/attribute edits as JSON for the theme bundle).
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
 
-namespace Suntourz\VisualEditor;
+namespace VisualEditor;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -927,7 +927,7 @@ final class VisualEdits {
 
 	/* ------------------------------------------------------------------ SEO for themes without their own hooks */
 
-	/** The Suntourz theme reads the stz_seo_* filters itself; everywhere else this plugin prints the tags. */
+	/** Themes that read the stz_seo_* filters themselves (they define STZ_THEME_VERSION) print their own tags; everywhere else this plugin does. */
 	private function prints_own_seo(): bool {
 		return ! defined( 'STZ_THEME_VERSION' ) && ! $this->seo_plugin_active();
 	}

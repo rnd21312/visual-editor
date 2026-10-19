@@ -43,7 +43,7 @@ On Windows run the command from PowerShell/cmd (not Git Bash) and use `--mount-d
 
 ## Release
 
-1. Bump the version in `suntourz-visual-editor.php` (`SVE_VERSION` and header) and `CHANGELOG.md`.
+1. Bump the version in `visual-editor.php` (`SVE_VERSION` and header) and `CHANGELOG.md`.
 2. `git tag v0.1.1 && git push --tags`.
 3. The **Release zip** workflow builds the bundles and attaches `visual-editor.zip` to the release.
 

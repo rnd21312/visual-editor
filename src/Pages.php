@@ -3,12 +3,12 @@
  * Page finder for the editor's picker and for the AI API: pages, posts and every public custom post type,
  * with search, type filter, paging and a preview image.
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
 
-namespace Suntourz\VisualEditor;
+namespace VisualEditor;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -61,7 +61,7 @@ final class Pages {
 			$object  = get_post_type_object( $post->post_type );
 			$items[] = array(
 				'id'        => (int) $post->ID,
-				'title'     => '' !== get_the_title( $post ) ? get_the_title( $post ) : __( '(no title)', 'suntourz-visual-editor' ),
+				'title'     => '' !== get_the_title( $post ) ? get_the_title( $post ) : __( '(no title)', 'visual-editor' ),
 				'url'       => (string) get_permalink( $post ),
 				'type'      => $post->post_type,
 				'typeLabel' => $object ? (string) $object->labels->singular_name : $post->post_type,

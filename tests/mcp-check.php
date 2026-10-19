@@ -4,7 +4,7 @@
  * write, all-or-nothing), short outline ids and the permission level.
  * Run: php -d zend.assertions=1 -d assert.exception=1 tests/mcp-check.php
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
@@ -104,8 +104,8 @@ namespace {
 }
 
 namespace {
-	use Suntourz\VisualEditor\Mcp;
-	use Suntourz\VisualEditor\VisualEdits;
+	use VisualEditor\Mcp;
+	use VisualEditor\VisualEdits;
 
 	$edits = new VisualEdits();
 	$mcp   = new Mcp( $edits );

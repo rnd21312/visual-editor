@@ -3,12 +3,12 @@
  * Strict validation for everything the AI API writes into CSS. Selectors and values end up inside a
  * <style> element, so anything that could close a rule, open another one, or load code is refused.
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
 
-namespace Suntourz\VisualEditor;
+namespace VisualEditor;
 
 defined( 'ABSPATH' ) || exit;
 

@@ -3,7 +3,7 @@
 Zero Composer dependencies (a PSR-4 autoloader ships in the main plugin file) and two front-end bundles built by Vite.
 
 ```
-suntourz-visual-editor.php   header, constants, autoloader
+visual-editor.php   header, constants, autoloader
 src/
 ├── VisualEdits.php     storage (sve_document), sanitising, <head> output, per-page SEO
 ├── EditorScreen.php    /?sve_editor=1 window, dashboard link, admin-bar link, preview mode

@@ -3,12 +3,12 @@
  * PHP twin of the editor's compileEdit() (frontend/src/lib/visualCss.ts): turns an edit into the CSS the
  * public site prints. Edits created through the API need it because no editor is there to compile them.
  *
- * @package Suntourz\VisualEditor
+ * @package VisualEditor
  */
 
 declare(strict_types=1);
 
-namespace Suntourz\VisualEditor;
+namespace VisualEditor;
 
 defined( 'ABSPATH' ) || exit;
 

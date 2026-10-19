@@ -390,7 +390,7 @@ export type TripRequestResponse = { ok: boolean; reference: string; response_tim
 
 type Section = { eyebrow?: string; title?: string; subtitle?: string };
 
-/** Editable copy (defaults in suntourz-core/data/content-defaults.json). */
+/** Editable copy. */
 export type SiteContent = {
   brand: {
     badge: string;
