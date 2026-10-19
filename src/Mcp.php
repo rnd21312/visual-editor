@@ -18,7 +18,10 @@ defined( 'ABSPATH' ) || exit;
 
 final class Mcp {
 
-	private const PROTOCOL = '2025-03-26';
+	private const PROTOCOL = '2025-06-18';
+
+	/** Protocol versions this server can speak; the client's choice wins when it is one of them. */
+	private const SUPPORTED = array( '2025-06-18', '2025-03-26', '2024-11-05' );
 
 	private const MAX_EDITS = 500;
 
@@ -46,9 +49,9 @@ final class Mcp {
 			case 'initialize':
 				return $reply(
 					array(
-						'protocolVersion' => (string) ( $params['protocolVersion'] ?? self::PROTOCOL ),
+						'protocolVersion' => in_array( $params['protocolVersion'] ?? '', self::SUPPORTED, true ) ? (string) $params['protocolVersion'] : self::PROTOCOL,
 						'capabilities'    => array( 'tools' => array( 'listChanged' => false ) ),
-						'serverInfo'      => array( 'name' => 'suntourz-visual-editor', 'version' => SVE_VERSION ),
+						'serverInfo'      => array( 'name' => Api::server_name(), 'title' => get_bloginfo( 'name' ), 'version' => SVE_VERSION ),
 						'instructions'    => $this->instructions(),
 					)
 				);
@@ -57,6 +60,10 @@ final class Mcp {
 			case 'tools/list':
 				return $reply( array( 'tools' => array_map( static fn ( array $tool ): array => array_diff_key( $tool, array( 'write' => 1 ) ), $this->tools() ) ) );
 			case 'tools/call':
+				if ( ! in_array( (string) ( $params['name'] ?? '' ), array_column( $this->tools(), 'name' ), true ) ) {
+					return $fail( -32602, 'Unknown tool: ' . (string) ( $params['name'] ?? '' ) );
+				}
+
 				return $reply( $this->call( (string) ( $params['name'] ?? '' ), is_array( $params['arguments'] ?? null ) ? $params['arguments'] : array() ) );
 			default:
 				return $fail( -32601, 'Method not found: ' . $method );
@@ -84,15 +91,20 @@ final class Mcp {
 
 	private function instructions(): string {
 		$level = Api::settings()['level'];
+		$about = Api::settings()['about'];
 
 		return implode(
 			"\n",
-			array(
-				'You edit the WordPress site "' . get_bloginfo( 'name' ) . '" through its visual editor.',
+			array_filter(
+				array(
+				'This server is ONE WordPress site: "' . get_bloginfo( 'name' ) . '" (' . Api::site() . '). Other WordPress MCP servers are other sites; never apply a change meant for one to another.',
+				'' !== $about ? 'About this site (from its owner): ' . $about : '',
+				'You edit it through its visual editor.',
 				'Workflow: list_pages / list_templates → get_page or get_outline (to learn selectors) → set_style, set_content, insert_html, add_css, set_seo.',
 				'Scopes: "page" = one URL, "template" = every item rendered by one theme template (a product page, a blog post, a category…) — use it instead of editing each product or post, "site" = everywhere (header, footer, global styles).',
 				'Prefer stable selectors from get_outline or short class selectors (.btn) over long paths. Responsive: device base|tablet|mobile. States: normal|hover|focus|active.',
 				'This key is: ' . ( 'read' === $level ? 'READ-ONLY.' : ( 'draft' === $level ? 'allowed to PROPOSE changes: they are saved as a draft that an administrator reviews and publishes in the editor.' : 'allowed to edit LIVE (every change keeps a revision).' ) ),
+				)
 			)
 		);
 	}
@@ -247,6 +259,8 @@ final class Mcp {
 
 		return array(
 			'site'         => get_bloginfo( 'name' ),
+			'url'          => home_url( '/' ),
+			'about'        => Api::settings()['about'],
 			'level'        => Api::settings()['level'],
 			'limits'       => Api::status()['limits'],
 			'pendingDraft' => null === $draft ? 0 : self::difference( $this->edits->get(), $draft ),
@@ -390,12 +404,13 @@ final class Mcp {
 				if ( 'live' === Api::settings()['level'] ) {
 					$this->edits->store( $clean );
 
-					return array( 'applied' => 'live', 'note' => 'The change is live. The previous version is kept as a revision.' );
+					return array( 'site' => Api::site(), 'applied' => 'live', 'note' => 'The change is live. The previous version is kept as a revision.' );
 				}
 
 				$this->edits->set_draft( $clean );
 
 				return array(
+					'site'    => Api::site(),
 					'applied' => 'draft',
 					'pending' => self::difference( $this->edits->get(), $clean ),
 					'note'    => 'Saved as a draft. An administrator reviews and publishes it in the visual editor.',
@@ -674,7 +689,11 @@ final class Mcp {
 	 */
 	private function set_seo( array $args ): array {
 		if ( isset( $args['template'] ) ) {
-			$key = 'tpl:' . preg_replace( '/[^A-Za-z0-9:_\-.\/]/', '', (string) $args['template'] );
+			$tpl = (string) preg_replace( '/[^A-Za-z0-9:_\-.\/]/', '', (string) $args['template'] );
+			if ( '' === $tpl ) {
+				throw new \RuntimeException( 'template is not a valid template key (see list_templates).' );
+			}
+			$key = 'tpl:' . $tpl;
 		} else {
 			$page = VisualEdits::page_key_for_url( (string) ( $args['url'] ?? '' ) );
 			if ( null === $page ) {

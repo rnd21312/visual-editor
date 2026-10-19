@@ -11,6 +11,10 @@ export type ApiStatus = {
   level: 'read' | 'draft' | 'live';
   hasKey: boolean;
   keyHint: string;
+  /** Owner's description of the site, given to the AI so it knows what this site is. */
+  about: string;
+  /** Unique MCP server name of this site, e.g. "wp-shop-example-com". */
+  serverName: string;
   created: number;
   lastUsed: number;
   calls: number;

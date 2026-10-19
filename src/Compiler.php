@@ -44,7 +44,7 @@ final class Compiler {
 			foreach ( self::MEDIA as $device => $media ) {
 				$body = self::declarations( (array) ( $edit['states'][ $state ][ $device ] ?? array() ) );
 				if ( '' !== $body ) {
-					$out[] = self::wrap( $media, $sel . ':' . $state . '{' . $body . '}' );
+					$out[] = self::wrap( $media, self::suffix( $sel, ':' . $state ) . '{' . $body . '}' );
 				}
 			}
 		}
@@ -57,10 +57,52 @@ final class Compiler {
 
 		$custom = trim( (string) ( $edit['css'] ?? '' ) );
 		if ( '' !== $custom ) {
-			$out[] = (string) preg_replace_callback( '/\bselector\b/', static fn (): string => $sel, $custom );
+			// The word "selector" only when it stands alone: not .selector-list, [data-selector], --selector-gap or "selector".
+			$self  = count( self::split( $sel ) ) > 1 ? ':is(' . $sel . ')' : $sel;
+			$out[] = (string) preg_replace_callback( '/(?<![\w\-.#\[:"\'])selector(?![\w\-\]"\'])/', static fn (): string => $self, $custom );
 		}
 
 		return implode( "\n", $out );
+	}
+
+	/**
+	 * The selectors of a list, split on top-level commas (not those inside (), [] or quotes).
+	 *
+	 * @return array<int, string>
+	 */
+	public static function split( string $sel ): array {
+		$parts = array();
+		$depth = 0;
+		$quote = '';
+		$start = 0;
+		$len   = strlen( $sel );
+		for ( $i = 0; $i < $len; $i++ ) {
+			$c = $sel[ $i ];
+			if ( '' !== $quote ) {
+				if ( '\\' === $c ) {
+					++$i;
+				} elseif ( $c === $quote ) {
+					$quote = '';
+				}
+			} elseif ( '"' === $c || "'" === $c ) {
+				$quote = $c;
+			} elseif ( '(' === $c || '[' === $c ) {
+				++$depth;
+			} elseif ( ')' === $c || ']' === $c ) {
+				--$depth;
+			} elseif ( ',' === $c && 0 === $depth ) {
+				$parts[] = trim( substr( $sel, $start, $i - $start ) );
+				$start   = $i + 1;
+			}
+		}
+		$parts[] = trim( substr( $sel, $start ) );
+
+		return array_values( array_filter( $parts, static fn ( string $part ): bool => '' !== $part ) );
+	}
+
+	/** Appends a pseudo-class to every selector of a list: "a, b" + ":hover" → "a:hover,b:hover". */
+	private static function suffix( string $sel, string $suffix ): string {
+		return implode( ',', array_map( static fn ( string $part ): string => $part . $suffix, self::split( $sel ) ) );
 	}
 
 	/**

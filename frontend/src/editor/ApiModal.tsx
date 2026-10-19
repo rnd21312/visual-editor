@@ -75,11 +75,14 @@ export const ApiModal = ({ api, initial, onRestore, onPreviewDraft, onDiscardDra
     }
   };
 
-  const configure = (change: Partial<Pick<ApiStatus, 'enabled' | 'level'>>) =>
+  const configure = (change: Partial<Pick<ApiStatus, 'enabled' | 'level' | 'about'>>) =>
     run(async () => {
       if (!status) return;
       setStatus(await api.put<ApiStatus>('admin/api', { enabled: status.enabled, level: status.level, ...change }));
     });
+
+  // The description is saved when the field loses focus, not on every keystroke.
+  const [about, setAbout] = useState<string | null>(null);
 
   const create = () =>
     run(async () => {
@@ -104,8 +107,10 @@ export const ApiModal = ({ api, initial, onRestore, onPreviewDraft, onDiscardDra
 
   const shownKey = key || 'YOUR_API_KEY';
   const endpoint = status?.endpoint ?? '';
-  const claude = `claude mcp add --transport http suntourz-editor ${endpoint} --header "Authorization: Bearer ${shownKey}"`;
-  const json = JSON.stringify({ mcpServers: { 'suntourz-editor': { type: 'http', url: endpoint, headers: { Authorization: `Bearer ${shownKey}` } } } }, null, 2);
+  // One name per site, so an AI client with several WordPress sites keeps their tools apart.
+  const name = status?.serverName ?? 'wordpress-site';
+  const claude = `claude mcp add --transport http ${name} ${endpoint} --header "Authorization: Bearer ${shownKey}"`;
+  const json = JSON.stringify({ mcpServers: { [name]: { type: 'http', url: endpoint, headers: { Authorization: `Bearer ${shownKey}` } } } }, null, 2);
   const curl = `curl -X POST ${endpoint} \\\n  -H "Authorization: Bearer ${shownKey}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`;
 
   return (
@@ -200,7 +205,24 @@ export const ApiModal = ({ api, initial, onRestore, onPreviewDraft, onDiscardDra
               )}
 
               <section>
-                <h3>3 · Connect an AI tool</h3>
+                <h3>3 · Describe this site to the AI</h3>
+                <p className="ve-hint">
+                  One or two sentences: what the site is, its language and audience. If you connect several sites, this is how the AI tells them apart (this one is
+                  called <code>{status.serverName}</code>).
+                </p>
+                <textarea
+                  rows={3}
+                  maxLength={500}
+                  value={about ?? status.about}
+                  disabled={busy}
+                  placeholder="e.g. Tour booking shop for Phuket, Persian-speaking customers, WooCommerce."
+                  onChange={(event) => setAbout(event.target.value)}
+                  onBlur={() => about !== null && about !== status.about && void configure({ about }).then(() => setAbout(null))}
+                />
+              </section>
+
+              <section>
+                <h3>4 · Connect an AI tool</h3>
                 <p className="ve-hint">The endpoint speaks MCP (Model Context Protocol) over HTTPS and also plain JSON-RPC.</p>
                 <Snippet label="Endpoint" text={endpoint} />
                 <Snippet label="Claude Code" text={claude} />

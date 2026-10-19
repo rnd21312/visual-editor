@@ -19,7 +19,7 @@ final class Guard {
 	 */
 	public static function selector( mixed $value ): ?string {
 		$sel = is_string( $value ) ? trim( $value ) : '';
-		if ( '' === $sel || strlen( $sel ) > 500 || str_contains( $sel, '/*' ) || str_contains( $sel, '--' ) ) {
+		if ( '' === $sel || strlen( $sel ) > 500 || str_contains( $sel, '/*' ) || str_contains( $sel, '-->' ) ) {
 			return null;
 		}
 
@@ -55,14 +55,32 @@ final class Guard {
 	 */
 	public static function css( mixed $value ): ?string {
 		$css = is_string( $value ) ? trim( $value ) : '';
-		if ( '' === $css || strlen( $css ) > 20000 || str_contains( $css, '<' ) || 1 === preg_match( '/@import|@charset|@font-face\s*{[^}]*src/i', $css ) ) {
+		if ( '' === $css || strlen( $css ) > 20000 || str_contains( $css, '<' ) ) {
+			return null;
+		}
+		// Browsers read "@\69mport" as "@import": check what the CSS means, not how it is spelled.
+		$plain = self::unescape( $css );
+		if ( 1 === preg_match( '/@import|@charset|@font-face\s*{[^}]*src/i', $plain ) ) {
 			return null;
 		}
 
 		return self::dangerous( $css ) ? null : $css;
 	}
 
+	/** Resolves CSS escapes (hex such as `\69 ` and single characters such as `\i`) so keyword checks cannot be dodged. */
+	private static function unescape( string $css ): string {
+		$css = (string) preg_replace_callback(
+			'/\\\\([0-9a-f]{1,6})[ \t\n\r\f]?/i',
+			static fn ( array $m ): string => ( $code = (int) hexdec( $m[1] ) ) > 0 && $code < 0x110000 ? html_entity_decode( '&#' . $code . ';', ENT_QUOTES, 'UTF-8' ) : '',
+			$css
+		);
+
+		return (string) preg_replace( '/\\\\(.)/su', '$1', $css );
+	}
+
 	private static function dangerous( string $text ): bool {
+		$text = self::unescape( $text );
+
 		return 1 === preg_match( '/expression\s*\(|javascript\s*:|vbscript\s*:|behavior\s*:|-moz-binding|data\s*:\s*text\/html|url\s*\(\s*[\'"]?\s*(?!https?:|\/|\.|#|data:image\/)/i', $text );
 	}
 

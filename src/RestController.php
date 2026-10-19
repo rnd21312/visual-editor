@@ -84,7 +84,7 @@ final class RestController {
 		);
 
 		// Public URL, protected by the API key inside the callback; hidden from the REST index.
-		register_rest_route( self::NS, '/mcp', array( 'methods' => WP_REST_Server::CREATABLE, 'callback' => array( $this, 'mcp' ), 'permission_callback' => '__return_true', 'show_in_index' => false ) );
+		register_rest_route( self::NS, '/mcp', array( 'methods' => 'POST, GET', 'callback' => array( $this, 'mcp' ), 'permission_callback' => '__return_true', 'show_in_index' => false ) );
 	}
 
 	/**
@@ -131,7 +131,7 @@ final class RestController {
 
 	public function configure_api( WP_REST_Request $request ): WP_REST_Response {
 		$body = (array) $request->get_json_params();
-		Api::configure( ! empty( $body['enabled'] ), (string) ( $body['level'] ?? 'draft' ) );
+		Api::configure( ! empty( $body['enabled'] ), (string) ( $body['level'] ?? 'draft' ), isset( $body['about'] ) ? (string) $body['about'] : null );
 
 		return new WP_REST_Response( $this->api_status() );
 	}
@@ -148,6 +148,14 @@ final class RestController {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public function mcp( WP_REST_Request $request ) {
+		// The server keeps no long-lived stream: clients that probe for one by GET are told to use POST.
+		if ( 'POST' !== $request->get_method() ) {
+			$response = $this->json( array( 'jsonrpc' => '2.0', 'id' => null, 'error' => array( 'code' => -32600, 'message' => 'Use POST.' ) ), 405 );
+			$response->header( 'Allow', 'POST' );
+
+			return $response;
+		}
+
 		$auth = Api::authenticate( $request );
 		if ( is_wp_error( $auth ) ) {
 			return $this->error_response( $auth );
@@ -172,7 +180,14 @@ final class RestController {
 			}
 			$limit = Api::throttle( $this->mcp->is_write( $message ) );
 			if ( null !== $limit ) {
-				return $this->error_response( $limit );
+				if ( ! $batch ) {
+					return $this->error_response( $limit );
+				}
+				// Keep the answers of the messages that already ran: only this one (and later ones) are refused.
+				if ( isset( $message['id'] ) ) {
+					$replies[] = array( 'jsonrpc' => '2.0', 'id' => $message['id'], 'error' => array( 'code' => -32000, 'message' => $limit->get_error_message() ) );
+				}
+				continue;
 			}
 			$reply = $this->mcp->handle( $message );
 			if ( null !== $reply ) {

@@ -19,9 +19,13 @@ Content-Type: application/json
 Claude Code example:
 
 ```bash
-claude mcp add --transport http site-editor https://your-site.com/wp-json/sve/v1/mcp \
+claude mcp add --transport http wp-your-site-com https://your-site.com/wp-json/sve/v1/mcp \
   --header "Authorization: Bearer YOUR_KEY"
 ```
+
+The ✦ dialog fills in the server name for you. It is unique per site (`wp-` + the site's domain), so several sites can be connected to the same AI client without their tools being mixed up. Use the **Describe this site to the AI** box to say what each site is; the text is sent to the AI when it connects, and every result repeats which site it changed.
+
+Behind a CDN or proxy, wrong-key blocking uses the proxy's address for everyone. Return the real client address with the `sve_client_ip` filter. A correct key is never blocked.
 
 The endpoint speaks JSON-RPC 2.0 (`initialize`, `ping`, `tools/list`, `tools/call`).
 

@@ -121,7 +121,8 @@ export const resolveOps = (doc: VisualDoc, page: string, tpl = ''): Op[] =>
 /** Normalises a pathname into the key used to scope edits to a page ("/", "/tours/", "/tours/phuket/"). */
 export const pageKey = (pathname: string, homePath = ''): string => {
   const base = homePath.replace(/\/+$/, '');
-  const rel = (base && pathname.startsWith(base) ? pathname.slice(base.length) : pathname).replace(
+  const inside = base !== '' && (pathname === base || pathname.startsWith(`${base}/`));
+  const rel = (inside ? pathname.slice(base.length) : pathname).replace(
     /^\/+|\/+$/g,
     '',
   );
@@ -133,6 +134,29 @@ const declarations = (styles: Record<string, string> | undefined): string =>
     .filter(([prop, value]) => prop.trim() !== '' && value.trim() !== '')
     .map(([prop, value]) => `${prop}:${value.replace(/!important/gi, '').trim()} !important`)
     .join(';');
+
+/** The selectors of a list, split on top-level commas (not those inside (), [] or quotes). */
+export const splitSelector = (sel: string): string[] => {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote = '';
+  let start = 0;
+  for (let i = 0; i < sel.length; i++) {
+    const c = sel[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth--;
+    else if (c === ',' && depth === 0) {
+      parts.push(sel.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  parts.push(sel.slice(start).trim());
+  return parts.filter(Boolean);
+};
 
 const wrap = (device: Device, rule: string): string => {
   const media = MEDIA[device];
@@ -155,9 +179,9 @@ export const compileEdit = (edit: Edit, live = false): string => {
     for (const device of DEVICES) {
       const body = declarations(edit.states?.[state]?.[device]);
       if (!body) continue;
-      const selector = live
-        ? `${edit.sel}:${state},${edit.sel}[data-ve-force~="${state}"]`
-        : `${edit.sel}:${state}`;
+      const selector = splitSelector(edit.sel)
+        .flatMap((part) => (live ? [`${part}:${state}`, `${part}[data-ve-force~="${state}"]`] : [`${part}:${state}`]))
+        .join(',');
       out.push(wrap(device, `${selector}{${body}}`));
     }
   }
@@ -167,7 +191,11 @@ export const compileEdit = (edit: Edit, live = false): string => {
   }
 
   const custom = edit.css.trim();
-  if (custom) out.push(custom.replace(/\bselector\b/g, edit.sel));
+  if (custom) {
+    // The word "selector" only when it stands alone: not .selector-list, [data-selector], --selector-gap or "selector".
+    const self = splitSelector(edit.sel).length > 1 ? `:is(${edit.sel})` : edit.sel;
+    out.push(custom.replace(/(?<![\w\-.#[:"'])selector(?![\w\-\]"'])/g, () => self));
+  }
 
   return out.join('\n');
 };

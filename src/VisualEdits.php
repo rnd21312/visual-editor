@@ -33,9 +33,6 @@ final class VisualEdits {
 
 	private const DEVICES = array( 'base', 'tablet', 'mobile' );
 
-	/** Attributes the editor may set. Event handlers, style and srcdoc are never allowed. */
-	private const ATTRS = array( 'href', 'src', 'srcset', 'sizes', 'alt', 'title', 'target', 'rel', 'placeholder', 'aria-label', 'aria-hidden', 'role', 'id', 'class', 'name', 'value', 'type', 'loading', 'width', 'height', 'poster', 'download' );
-
 	private const URL_ATTRS = array( 'href', 'src', 'poster' );
 
 	private const TAGS = array( 'div', 'section', 'article', 'aside', 'nav', 'header', 'footer', 'main', 'figure', 'span', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'a', 'button', 'label' );
@@ -44,6 +41,9 @@ final class VisualEdits {
 
 	/** Whether the document being sanitized may keep unfiltered HTML and runnable embeds (set by sanitize()). */
 	private bool $unfiltered = false;
+
+	/** md5 of the HTML already stored, which a user without unfiltered_html may keep when saving (see save()). */
+	private array $known = array();
 
 	public function hooks(): void {
 		add_action( 'wp_head', array( $this, 'print_css' ), 99 );
@@ -77,7 +77,11 @@ final class VisualEdits {
 	 * @return array{v:int, css:string, edits:array<int, array<string, mixed>>}
 	 */
 	public function save( array $input ): array {
-		$doc = $this->sanitize( $input );
+		// People without unfiltered_html (editors) have markup filtered, but must not lose what an administrator
+		// put in earlier (embeds, scripts): HTML that is already stored is kept as it is.
+		$this->known = current_user_can( 'unfiltered_html' ) ? array() : $this->stored_html( $this->get() );
+		$doc         = $this->sanitize( $input );
+		$this->known = array();
 
 		return $this->locked(
 			function () use ( $doc ): array {
@@ -88,6 +92,23 @@ final class VisualEdits {
 				return $this->store( $doc );
 			}
 		);
+	}
+
+	/**
+	 * @param array<string, mixed> $doc Stored document.
+	 * @return array<string, true> md5 of every HTML string in it.
+	 */
+	private function stored_html( array $doc ): array {
+		$set = array();
+		foreach ( array( 'edits', 'ops', 'components' ) as $list ) {
+			foreach ( (array) ( $doc[ $list ] ?? array() ) as $item ) {
+				if ( is_array( $item ) && ! empty( $item['html'] ) && is_string( $item['html'] ) ) {
+					$set[ md5( $item['html'] ) ] = true;
+				}
+			}
+		}
+
+		return $set;
 	}
 
 	/**
@@ -287,7 +308,7 @@ final class VisualEdits {
 	private function html( mixed $value, int $max = 50000 ): string {
 		$html = substr( is_string( $value ) ? $value : '', 0, $max );
 
-		return $this->unfiltered ? $html : wp_kses_post( $html );
+		return $this->unfiltered || isset( $this->known[ md5( $html ) ] ) ? $html : wp_kses_post( $html );
 	}
 
 	private function id( mixed $value ): string {
@@ -343,7 +364,7 @@ final class VisualEdits {
 					$op['comp'] = $this->id( $item['comp'] );
 				}
 				// Embed snippets may run scripts, which only users allowed to post unfiltered HTML can add.
-				if ( ! empty( $item['exec'] ) && $this->unfiltered ) {
+				if ( ! empty( $item['exec'] ) && ( $this->unfiltered || isset( $this->known[ md5( $op['html'] ) ] ) ) ) {
 					$op['exec'] = true;
 				}
 				if ( '' === trim( $op['html'] ) && empty( $op['comp'] ) ) {
@@ -712,7 +733,7 @@ final class VisualEdits {
 
 		foreach ( array_slice( $raw, 0, 40, true ) as $name => $value ) {
 			$name = strtolower( (string) $name );
-			if ( ! in_array( $name, self::ATTRS, true ) && ! preg_match( '/^data-[a-z0-9_-]+$/', $name ) ) {
+			if ( ! Guard::attribute( $name ) ) { // Event handlers, style and srcdoc are never allowed.
 				continue;
 			}
 			if ( null === $value ) {
@@ -759,7 +780,7 @@ final class VisualEdits {
 
 	private static function normalize_path( string $path ): string {
 		$home = rtrim( (string) wp_parse_url( home_url(), PHP_URL_PATH ), '/' );
-		if ( '' !== $home && str_starts_with( $path, $home ) ) {
+		if ( '' !== $home && ( $path === $home || str_starts_with( $path, $home . '/' ) ) ) {
 			$path = substr( $path, strlen( $home ) );
 		}
 		$path = trim( rawurldecode( $path ), '/' );

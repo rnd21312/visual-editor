@@ -597,6 +597,8 @@ export const EditorApp = ({ config }: { config: EditorConfig }) => {
   const previewDraft = () =>
     api.get<VisualDoc | null>('admin/draft').then((proposed) => {
       if (!proposed) return setDraftInfo(null);
+      // The draft replaces the document being edited: unsaved work would only come back through undo.
+      if (dirty && !window.confirm('You have unsaved changes. Showing the AI draft replaces them (Undo brings them back). Continue?')) return;
       dispatch({ type: 'doc', fn: () => proposed, key: '', at: Date.now() });
       setDraftLoaded(true);
       setApiOpen(false);

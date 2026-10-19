@@ -31,5 +31,7 @@ jobs:
           php-version: '8.1'
       - name: Lint PHP
         run: find . -name '*.php' -not -path './frontend/*' -print0 | xargs -0 -n1 php -l > /dev/null
-      - name: Draft merge check
-        run: php -d zend.assertions=1 -d assert.exception=1 tests/rebase-check.php
+      - name: PHP self-checks
+        run: |
+          php -d zend.assertions=1 -d assert.exception=1 tests/rebase-check.php
+          php -d zend.assertions=1 -d assert.exception=1 tests/guard-check.php

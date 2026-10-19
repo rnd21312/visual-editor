@@ -34,7 +34,7 @@ final class Api {
 	private const FAILS_PER_WINDOW = 20;
 
 	/**
-	 * @return array{enabled: bool, level: string, hash: string, hint: string, created: int, last_used: int, calls: int}
+	 * @return array{enabled: bool, level: string, hash: string, hint: string, about: string, created: int, last_used: int, calls: int}
 	 */
 	public static function settings(): array {
 		$saved = get_option( self::OPTION, array() );
@@ -46,6 +46,7 @@ final class Api {
 			'level'     => in_array( $saved['level'] ?? '', array( 'read', 'draft', 'live' ), true ) ? (string) $saved['level'] : 'draft',
 			'hash'      => (string) ( $saved['hash'] ?? '' ),
 			'hint'      => (string) ( $saved['hint'] ?? '' ),
+			'about'     => (string) ( $saved['about'] ?? '' ),
 			'created'   => (int) ( $saved['created'] ?? 0 ),
 			'last_used' => (int) ( $saved['last_used'] ?? 0 ),
 			'calls'     => (int) ( $saved['calls'] ?? 0 ),
@@ -64,6 +65,21 @@ final class Api {
 	}
 
 	/**
+	 * Name this site gives its MCP server, unique per site ("wp-shop-example-com"), so an AI client that has
+	 * several WordPress sites connected keeps their tools apart.
+	 */
+	public static function server_name(): string {
+		$slug = trim( (string) preg_replace( '/[^a-z0-9]+/', '-', strtolower( self::site() ) ), '-' );
+
+		return substr( 'wp-' . ( '' !== $slug ? $slug : 'site' ), 0, 48 );
+	}
+
+	/** Host (and folder) of this site, repeated in every result so the AI sees which site a change landed on. */
+	public static function site(): string {
+		return (string) wp_parse_url( home_url(), PHP_URL_HOST ) . rtrim( (string) wp_parse_url( home_url(), PHP_URL_PATH ), '/' );
+	}
+
+	/**
 	 * What the settings screen may show (never the key itself).
 	 *
 	 * @return array<string, mixed>
@@ -76,6 +92,8 @@ final class Api {
 			'level'    => $s['level'],
 			'hasKey'   => '' !== $s['hash'],
 			'keyHint'  => $s['hint'],
+			'about'    => $s['about'],
+			'serverName' => self::server_name(),
 			'created'  => $s['created'],
 			'lastUsed' => $s['last_used'],
 			'calls'    => $s['calls'],
@@ -88,12 +106,12 @@ final class Api {
 		);
 	}
 
-	public static function configure( bool $enabled, string $level ): void {
+	public static function configure( bool $enabled, string $level, ?string $about = null ): void {
 		self::write(
 			array(
 				'enabled' => $enabled,
 				'level'   => in_array( $level, array( 'read', 'draft', 'live' ), true ) ? $level : 'draft',
-			)
+			) + ( null === $about ? array() : array( 'about' => substr( sanitize_textarea_field( $about ), 0, 500 ) ) )
 		);
 	}
 
@@ -124,7 +142,10 @@ final class Api {
 	}
 
 	private static function ip(): string {
-		return substr( (string) ( $_SERVER['REMOTE_ADDR'] ?? 'unknown' ), 0, 64 ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+		// Behind a CDN or proxy REMOTE_ADDR is the proxy for everyone: return the real client address here.
+		$ip = (string) apply_filters( 'sve_client_ip', $_SERVER['REMOTE_ADDR'] ?? 'unknown' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+
+		return substr( $ip, 0, 64 );
 	}
 
 	private static function limited( string $message, int $retry ): WP_Error {
@@ -142,21 +163,23 @@ final class Api {
 			return new WP_Error( 'sve_api_disabled', 'The AI API is switched off.', array( 'status' => 403 ) );
 		}
 
-		$bucket = 'sve_fail_' . md5( self::ip() );
-		if ( (int) get_transient( $bucket ) >= self::FAILS_PER_WINDOW ) {
-			return self::limited( 'Too many wrong keys. Try again in a few minutes.', 600 );
-		}
-
 		$header = (string) $request->get_header( 'authorization' );
 		$token  = 0 === stripos( $header, 'bearer ' ) ? trim( substr( $header, 7 ) ) : trim( (string) $request->get_header( 'x-sve-key' ) );
 
-		if ( '' === $token || ! hash_equals( $settings['hash'], self::hash( $token ) ) ) {
-			set_transient( $bucket, (int) get_transient( $bucket ) + 1, 10 * MINUTE_IN_SECONDS );
-
-			return new WP_Error( 'sve_bad_key', 'Missing or wrong API key.', array( 'status' => 401 ) );
+		// The right key always gets in: the key is 192 random bits, and a lockout keyed on the IP must not
+		// shut out the real client when someone else behind the same address guesses wrong.
+		if ( '' !== $token && hash_equals( $settings['hash'], self::hash( $token ) ) ) {
+			return true;
 		}
 
-		return true;
+		$bucket = 'sve_fail_' . md5( self::ip() );
+		$fails  = (int) get_transient( $bucket );
+		if ( $fails >= self::FAILS_PER_WINDOW ) {
+			return self::limited( 'Too many wrong keys. Try again in a few minutes.', 600 );
+		}
+		set_transient( $bucket, $fails + 1, 10 * MINUTE_IN_SECONDS );
+
+		return new WP_Error( 'sve_bad_key', 'Missing or wrong API key.', array( 'status' => 401 ) );
 	}
 
 	/**

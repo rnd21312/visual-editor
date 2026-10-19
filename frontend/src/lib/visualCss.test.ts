@@ -28,6 +28,7 @@ describe('pageKey', () => {
     expect(pageKey('/tours')).toBe('/tours/');
     expect(pageKey('/tours/phuket/')).toBe('/tours/phuket/');
     expect(pageKey('/shop/tours/', '/shop')).toBe('/tours/');
+    expect(pageKey('/shopping/', '/shop')).toBe('/shopping/');
     expect(pageKey('/shop/', '/shop/')).toBe('/');
   });
 });
@@ -51,6 +52,18 @@ describe('compileEdit', () => {
 
   it('replaces the selector keyword in custom CSS', () => {
     expect(compileEdit(edit({ css: 'selector:hover{opacity:.5}' }))).toBe('h1:hover{opacity:.5}');
+  });
+
+  it('only replaces the standalone word "selector"', () => {
+    const css = '.selector-list{a:b}[data-selector]{c:d}--selector-gap:1;content:"selector";selector>i{e:f}';
+
+    expect(compileEdit(edit({ css }))).toBe(css.replace('selector>i', 'h1>i'));
+  });
+
+  it('applies states to every selector of a list, and wraps lists for the keyword', () => {
+    const list = edit({ sel: 'a, .b:not(.c, .d)', css: 'selector{x:y}', states: { hover: { base: { color: 'red' } } } });
+
+    expect(compileEdit(list)).toBe('a:hover,.b:not(.c, .d):hover{color:red !important}\n:is(a, .b:not(.c, .d)){x:y}');
   });
 
   it('compiles :hover styles, and lets the editor preview force them', () => {
