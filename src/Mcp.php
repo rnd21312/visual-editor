@@ -25,6 +25,14 @@ final class Mcp {
 
 	private const MAX_EDITS = 500;
 
+	/** Last outline: short ids (n12) to the selectors they stand for. */
+	private const OUTLINE = 'sve_outline';
+
+	private const TEMPLATES = 'sve_tpl_cache';
+
+	/** While edit() runs, write() collects changes here so they are applied (and revisioned) once. */
+	private ?array $batch = null;
+
 	public function __construct( private VisualEdits $edits ) {}
 
 	/* ------------------------------------------------------------------ JSON-RPC */
@@ -97,19 +105,21 @@ final class Mcp {
 	private function instructions(): string {
 		$level = Api::settings()['level'];
 		$about = Api::settings()['about'];
+		$mode  = array(
+			'read'  => 'READ-ONLY.',
+			'draft' => 'changes are PROPOSED as a draft the owner approves.',
+			'live'  => 'changes go LIVE (each keeps a revision).',
+			'full'  => 'FULL ACCESS as administrator through wp: deleting and user changes may be irreversible.',
+		);
 
 		return implode(
 			"\n",
 			array_filter(
 				array(
-				'This server is ONE WordPress site: "' . get_bloginfo( 'name' ) . '" (' . Api::site() . '). Other WordPress MCP servers are other sites; never apply a change meant for one to another.',
-				'' !== $about ? 'About this site (from its owner): ' . $about : '',
-				'You edit it through its visual editor.',
-				'Workflow: list_pages / list_templates → get_page or get_outline (to learn selectors) → set_style, set_content, insert_html, add_css, set_seo.',
-				'Scopes: "page" = one URL, "template" = every item rendered by one theme template (a product page, a blog post, a category…) — use it instead of editing each product or post, "site" = everywhere (header, footer, global styles).',
-				'Prefer stable selectors from get_outline or short class selectors (.btn) over long paths. Responsive: device base|tablet|mobile. States: normal|hover|focus|active.',
-				'This key is: ' . ( 'read' === $level ? 'READ-ONLY.' : ( 'draft' === $level ? 'allowed to PROPOSE changes: they are saved as a draft that an administrator reviews and publishes in the editor.' : 'allowed to edit LIVE (every change keeps a revision).' ) ),
-				'full' === $level ? 'FULL ACCESS: tool wp reaches everything the REST API offers as an administrator (content, media, menus, settings, users, plugins, WooCommerce). Use routes to find paths. Be careful: deleting and user changes cannot always be undone.' : '',
+					'ONE WordPress site: "' . get_bloginfo( 'name' ) . '" (' . Api::site() . '). Other WordPress MCP servers are other sites; never mix them up.',
+					'' !== $about ? 'About: ' . $about : '',
+					'Flow: site, then pages / outline, then edit (put many changes in ONE call). Scopes: page (one URL), template (every item a theme template renders, e.g. all products), site (everywhere). wp reaches the rest of WordPress; call it without path to find routes.',
+					'This key: ' . ( $mode[ $level ] ?? $mode['draft'] ),
 				)
 			)
 		);
@@ -118,119 +128,74 @@ final class Mcp {
 	/* ------------------------------------------------------------------ tools */
 
 	/**
+	 * Few tools with short descriptions: the list is sent to the AI at the start of every session.
+	 *
 	 * @return array<int, array<string, mixed>>
 	 */
 	private function tools(): array {
-		$scope = array(
-			'scope'    => array( 'type' => 'string', 'enum' => array( 'page', 'template', 'site' ), 'description' => 'Where the change applies. Default: "page" when url is given, "template" when template is given, otherwise "site".' ),
-			'url'      => array( 'type' => 'string', 'description' => 'Page URL (for scope "page").' ),
-			'template' => array( 'type' => 'string', 'description' => 'Template key from list_templates, e.g. "single:product" (for scope "template").' ),
-		);
 		$object = static fn ( array $properties, array $required = array() ): array => array(
 			'type'                 => 'object',
 			'properties'           => (object) $properties,
 			'required'             => $required,
 			'additionalProperties' => false,
 		);
-		$string = static fn ( string $description ): array => array( 'type' => 'string', 'description' => $description );
+		$string = static fn ( string $description = '' ): array => array_filter( array( 'type' => 'string', 'description' => $description ) );
 
 		return array(
-			array( 'name' => 'status', 'description' => 'Permissions of this key, request limits and the number of changes waiting for approval.', 'inputSchema' => $object( array() ) ),
-			array( 'name' => 'list_pages', 'description' => 'Find pages, posts, products… (search, type filter, paging).', 'inputSchema' => $object( array( 'search' => $string( 'Words to search for' ), 'type' => $string( 'Post type slug, e.g. page, post, product' ), 'page' => array( 'type' => 'integer' ) ) ) ),
-			array( 'name' => 'list_templates', 'description' => 'Theme templates (single product, single post, category archive…) with one sample URL each. Edit these instead of every product or post.', 'inputSchema' => $object( array() ) ),
-			array( 'name' => 'get_page', 'description' => 'Everything the editor changed for a URL: edits, inserted/moved/removed elements and SEO (page, template and site-wide).', 'inputSchema' => $object( array( 'url' => $string( 'Page URL' ), 'template' => $string( 'Template key, to read the template-level changes' ) ) ) ),
-			array( 'name' => 'get_outline', 'description' => 'Map of a page: every visible tag with its CSS selector, classes and text. Built from the server-rendered HTML.', 'inputSchema' => $object( array( 'url' => $string( 'Page URL' ), 'max_nodes' => array( 'type' => 'integer', 'description' => 'Default 250, maximum 600' ) ), array( 'url' ) ) ),
-			array( 'name' => 'list_components', 'description' => 'Saved reusable components.', 'inputSchema' => $object( array() ) ),
 			array(
-				'name'        => 'set_style',
-				'description' => 'Set CSS properties on every element matching a selector.',
-				'write'       => true,
-				'inputSchema' => $object(
-					array_merge(
-						$scope,
-						array(
-							'selector' => $string( 'CSS selector' ),
-							'styles'   => array( 'type' => 'object', 'description' => 'Property → value, e.g. {"color":"#c00","font-size":"20px"}. Empty string removes a property.' ),
-							'device'   => array( 'type' => 'string', 'enum' => array( 'base', 'tablet', 'mobile' ), 'description' => 'base = all widths; tablet ≤1023px; mobile ≤767px' ),
-							'state'    => array( 'type' => 'string', 'enum' => array( 'normal', 'hover', 'focus', 'active' ) ),
-						)
-					),
-					array( 'selector', 'styles' )
-				),
+				'name'        => 'site',
+				'description' => 'Overview of this site: theme, plugins, post types, templates, components, pending proposals. With url or template, also the changes already made there.',
+				'inputSchema' => $object( array( 'url' => $string( 'Page URL or path' ), 'template' => $string( 'Template key from site' ) ) ),
 			),
 			array(
-				'name'        => 'add_css',
-				'description' => 'Add free CSS. With a selector, the word "selector" inside the CSS stands for it. Without one, the CSS is global for the scope.',
-				'write'       => true,
-				'inputSchema' => $object( array_merge( $scope, array( 'css' => $string( 'CSS rules' ), 'selector' => $string( 'Optional selector' ) ) ), array( 'css' ) ),
+				'name'        => 'pages',
+				'description' => 'Find pages, posts, products… by words. One line each: id, type, title, path.',
+				'inputSchema' => $object( array( 'search' => $string(), 'type' => $string( 'Post type, e.g. page, product' ), 'page' => array( 'type' => 'integer' ) ) ),
 			),
 			array(
-				'name'        => 'set_content',
-				'description' => 'Change the text, inner HTML or attributes (href, src, alt, class …) of elements matching a selector.',
-				'write'       => true,
-				'inputSchema' => $object( array_merge( $scope, array( 'selector' => $string( 'CSS selector' ), 'text' => $string( 'Plain text' ), 'html' => $string( 'Inner HTML (sanitised; scripts are removed)' ), 'attrs' => array( 'type' => 'object', 'description' => 'Attribute → value, null removes it' ) ) ), array( 'selector' ) ),
+				'name'        => 'outline',
+				'description' => 'Compact map of a page. Each line starts with an id (n12) that edit accepts as selector.',
+				'inputSchema' => $object( array( 'url' => $string( 'Page URL or path' ), 'find' => $string( 'Only lines containing this text' ), 'max_nodes' => array( 'type' => 'integer', 'description' => 'Default 120, max 600' ) ), array( 'url' ) ),
 			),
 			array(
-				'name'        => 'insert_html',
-				'description' => 'Insert markup before/after/inside the element matching a selector.',
-				'write'       => true,
-				'inputSchema' => $object( array_merge( $scope, array( 'selector' => $string( 'Anchor element' ), 'position' => array( 'type' => 'string', 'enum' => array( 'before', 'after', 'prepend', 'append' ) ), 'html' => $string( 'Markup (sanitised; scripts are removed)' ) ) ), array( 'selector', 'position', 'html' ) ),
-			),
-			array(
-				'name'        => 'remove_element',
-				'description' => 'Remove the element matching a selector (it is replaced by an inert placeholder, so nothing else shifts).',
-				'write'       => true,
-				'inputSchema' => $object( array_merge( $scope, array( 'selector' => $string( 'CSS selector' ) ) ), array( 'selector' ) ),
-			),
-			array(
-				'name'        => 'set_seo',
-				'description' => 'Title, meta description, share image, canonical, robots and JSON-LD of a page or a template. Template titles may use %title% and %site%.',
+				'name'        => 'edit',
+				'description' => 'Apply one or more changes in a single call (all or nothing). op style: selector, styles{prop:value}, device base|tablet|mobile, state normal|hover|focus|active. css: css, selector?. content: selector, text|html, attrs{}. insert: selector, position before|after|prepend|append, html. remove: selector. seo: title, description, image, canonical, noindex, nofollow, jsonld. component: name, html, css?, kind html|jsonld. discard: alone, drops the proposals. selector = nN id or CSS.',
 				'write'       => true,
 				'inputSchema' => $object(
 					array(
-						'url'         => $string( 'Page URL (for one page)' ),
-						'template'    => $string( 'Template key (for all items of a template)' ),
-						'title'       => $string( 'SEO title' ),
-						'description' => $string( 'Meta description' ),
-						'image'       => $string( 'Share image URL' ),
-						'canonical'   => $string( 'Canonical URL' ),
-						'noindex'     => array( 'type' => 'boolean' ),
-						'nofollow'    => array( 'type' => 'boolean' ),
-						'jsonld'      => $string( 'JSON-LD as a JSON string' ),
+						'scope'    => array( 'type' => 'string', 'enum' => array( 'page', 'template', 'site' ), 'description' => 'Default: page if url, template if template, else site' ),
+						'url'      => $string(),
+						'template' => $string(),
+						'changes'  => array(
+							'type'  => 'array',
+							'items' => array(
+								'type'       => 'object',
+								'properties' => (object) array( 'op' => array( 'type' => 'string', 'enum' => array( 'style', 'css', 'content', 'insert', 'remove', 'seo', 'component', 'discard' ) ) ),
+								'required'   => array( 'op' ),
+							),
+						),
+					),
+					array( 'changes' )
+				),
+			),
+			array(
+				'name'        => 'wp',
+				'description' => 'WordPress REST API as the key\'s administrator: content, media, menus, settings, users, plugins, WooCommerce. GET/OPTIONS at every level, changes need Full access. No path + search = find routes.',
+				'inputSchema' => $object(
+					array(
+						'method' => array( 'type' => 'string', 'enum' => array( 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS' ) ),
+						'path'   => $string( 'e.g. /wp/v2/posts' ),
+						'params' => array( 'type' => 'object' ),
+						'fields' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ), 'description' => 'Only these fields (saves tokens)' ),
+						'search' => $string( 'With no path: word in the route' ),
 					)
 				),
 			),
 			array(
-				'name'        => 'save_component',
-				'description' => 'Create or replace a reusable component.',
-				'write'       => true,
-				'inputSchema' => $object( array( 'name' => $string( 'Component name' ), 'html' => $string( 'Markup' ), 'css' => $string( 'Optional CSS' ), 'kind' => array( 'type' => 'string', 'enum' => array( 'html', 'jsonld' ) ) ), array( 'name', 'html' ) ),
-			),
-			array(
-				'name'        => 'discard_draft',
-				'description' => 'Throw away the changes proposed so far (only affects the draft, never the live site).',
-				'write'       => true,
-				'inputSchema' => $object( array() ),
-			),
-			array(
-				'name'        => 'wp',
-				'description' => 'Call the WordPress REST API as this key\'s administrator: posts, pages, media, menus, settings, users, plugins, themes, WooCommerce and any plugin with REST routes. Reads (GET, OPTIONS) work at every level; changes need "Full access". Use routes to find paths and OPTIONS to see a route\'s arguments.',
-				'inputSchema' => $object(
-					array(
-						'method' => array( 'type' => 'string', 'enum' => array( 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS' ) ),
-						'path'   => $string( 'Route, e.g. /wp/v2/posts or /wc/v3/products/12' ),
-						'params' => array( 'type' => 'object', 'description' => 'Query (GET) or JSON body (other methods)' ),
-						'fields' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ), 'description' => 'Only these fields (saves tokens), e.g. ["id","title"]' ),
-					),
-					array( 'path' )
-				),
-			),
-			array( 'name' => 'routes', 'description' => 'Find REST routes of this site by a word in the path (e.g. "product", "menu"). Shows the methods each accepts.', 'inputSchema' => $object( array( 'search' => $string( 'Word in the route path' ) ) ) ),
-			array(
 				'name'        => 'upload_media',
-				'description' => 'Add an image or file to the media library from a public URL. Returns the attachment id and its URL.',
+				'description' => 'Add a file to the media library from a public URL (Full access).',
 				'write'       => true,
-				'inputSchema' => $object( array( 'url' => $string( 'Public https URL of the file' ), 'title' => $string( 'Title' ), 'alt' => $string( 'Alt text' ), 'post_id' => array( 'type' => 'integer', 'description' => 'Attach to this post' ) ), array( 'url' ) ),
+				'inputSchema' => $object( array( 'url' => $string(), 'title' => $string(), 'alt' => $string(), 'post_id' => array( 'type' => 'integer' ) ), array( 'url' ) ),
 			),
 		);
 	}
@@ -252,30 +217,21 @@ final class Mcp {
 			}
 
 			$result = match ( $name ) {
-				'status'          => $this->status(),
-				'list_pages'      => $this->list_pages( $args ),
-				'list_templates'  => $this->list_templates(),
-				'get_page'        => $this->get_page( $args ),
-				'get_outline'     => $this->get_outline( $args ),
-				'list_components' => $this->list_components(),
-				'set_style'       => $this->set_style( $args ),
-				'add_css'         => $this->add_css( $args ),
-				'set_content'     => $this->set_content( $args ),
-				'insert_html'     => $this->insert_html( $args ),
-				'remove_element'  => $this->remove_element( $args ),
-				'set_seo'         => $this->set_seo( $args ),
-				'save_component'  => $this->save_component( $args ),
-				'discard_draft'   => $this->discard_draft(),
-				'wp'              => $this->wp( $args ),
-				'routes'          => $this->routes( $args ),
-				'upload_media'    => $this->upload_media( $args ),
-				default           => throw new \RuntimeException( 'Unknown tool: ' . $name ),
+				'site'         => $this->site( $args ),
+				'pages'        => $this->pages( $args ),
+				'outline'      => $this->outline( $args ),
+				'edit'         => $this->edit( $args ),
+				'wp'           => $this->wp( $args ),
+				'upload_media' => $this->upload_media( $args ),
+				default        => throw new \RuntimeException( 'Unknown tool: ' . $name ),
 			};
 			if ( $write ) {
 				Api::log( $name . ' ' . (string) wp_json_encode( $args, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
 			}
 
-			return array( 'content' => array( array( 'type' => 'text', 'text' => (string) wp_json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) ) ) );
+			$text = is_string( $result ) ? $result : (string) wp_json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+
+			return array( 'content' => array( array( 'type' => 'text', 'text' => $text ) ) );
 		} catch ( \Throwable $error ) {
 			return array( 'content' => array( array( 'type' => 'text', 'text' => $error->getMessage() ) ), 'isError' => true );
 		}
@@ -284,26 +240,101 @@ final class Mcp {
 	/* ------------------------------------------------------------------ reading */
 
 	/**
+	 * @param array<string, mixed> $args Arguments.
 	 * @return array<string, mixed>
 	 */
-	private function status(): array {
-		$draft = $this->edits->draft();
+	private function site( array $args ): array {
+		$settings  = Api::settings();
+		$draft     = $this->edits->draft();
+		$templates = get_transient( self::TEMPLATES );
+		if ( ! is_array( $templates ) ) {
+			$templates = array();
+			foreach ( Templates::listing() as $item ) {
+				$templates[ $item['key'] ] = wp_make_link_relative( $item['url'] );
+			}
+			set_transient( self::TEMPLATES, $templates, 10 * MINUTE_IN_SECONDS );
+		}
+		$plugins = array();
+		foreach ( (array) get_option( 'active_plugins', array() ) as $file ) {
+			$plugins[] = (string) strtok( (string) $file, '/' );
+		}
 
-		return array(
-			'site'         => get_bloginfo( 'name' ),
-			'url'          => home_url( '/' ),
-			'about'        => Api::settings()['about'],
-			'level'        => Api::settings()['level'],
-			'limits'       => Api::status()['limits'],
-			'pendingDraft' => null === $draft ? 0 : self::difference( $this->edits->get(), $draft ),
+		$out = array_filter(
+			array(
+				'name'       => get_bloginfo( 'name' ),
+				'url'        => home_url( '/' ),
+				'about'      => $settings['about'],
+				'level'      => $settings['level'],
+				'pending'    => null === $draft ? 0 : self::difference( $this->edits->get(), $draft ),
+				'theme'      => wp_get_theme()->get( 'Name' ),
+				'plugins'    => array_slice( $plugins, 0, 40 ),
+				'types'      => Pages::types(),
+				'templates'  => $templates,
+				'components' => array_map( static fn ( array $component ): string => $component['name'] . ' (' . $component['kind'] . ')', $this->working_doc()['components'] ),
+			),
+			static fn ( $value ): bool => ! in_array( $value, array( '', array(), 0 ), true )
+		);
+		if ( isset( $args['url'] ) || isset( $args['template'] ) ) {
+			$out['changes'] = $this->changes( $args );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * What was already changed for a page or template (page, template and site-wide), without ids or bookkeeping.
+	 *
+	 * @param array<string, mixed> $args Arguments.
+	 * @return array<string, mixed>
+	 */
+	private function changes( array $args ): array {
+		$doc  = $this->working_doc();
+		$page = isset( $args['url'] ) ? VisualEdits::page_key_for_url( (string) $args['url'] ) : null;
+		$tpl  = isset( $args['template'] ) ? (string) $args['template'] : '';
+
+		$matches = static fn ( array $item ): bool => 'site' === $item['scope']
+			|| ( 'page' === $item['scope'] && null !== $page && $item['page'] === $page )
+			|| ( 'template' === $item['scope'] && '' !== $tpl && ( $item['tpl'] ?? '' ) === $tpl );
+
+		return array_filter(
+			array(
+				'seo'   => array_filter(
+					array(
+						'page'     => null !== $page ? ( $doc['seo'][ $page ] ?? null ) : null,
+						'template' => '' !== $tpl ? ( $doc['seo'][ 'tpl:' . $tpl ] ?? null ) : null,
+					)
+				),
+				'edits' => array_map(
+					static fn ( array $edit ): array => array_filter(
+						array(
+							'scope'    => $edit['scope'],
+							'selector' => $edit['sel'],
+							'styles'   => $edit['styles'] ?: null,
+							'states'   => $edit['states'] ?? null,
+							'css'      => '' !== $edit['css'] ? $edit['css'] : null,
+							'text'     => $edit['text'] ?? null,
+							'html'     => $edit['html'] ?? null,
+							'attrs'    => $edit['attrs'] ?? null,
+						),
+						static fn ( $value ): bool => null !== $value
+					),
+					array_values( array_filter( $doc['edits'], $matches ) )
+				),
+				'ops'   => array_map(
+					static fn ( array $op ): array => array_diff_key( $op, array( 'id' => 1, 'page' => 1, 'tpl' => 1 ) ),
+					array_values( array_filter( $doc['ops'], $matches ) )
+				),
+			),
+			static fn ( $value ): bool => array() !== $value
 		);
 	}
 
 	/**
+	 * One line per page: id, type, title, path.
+	 *
 	 * @param array<string, mixed> $args Arguments.
-	 * @return array<string, mixed>
 	 */
-	private function list_pages( array $args ): array {
+	private function pages( array $args ): string {
 		$found = Pages::search(
 			array(
 				'search'   => (string) ( $args['search'] ?? '' ),
@@ -313,92 +344,64 @@ final class Mcp {
 			)
 		);
 
-		return array(
-			'total' => $found['total'],
-			'pages' => $found['pages'],
-			'types' => $found['types'],
-			'items' => array_map(
-				static fn ( array $item ): array => array_intersect_key( $item, array_flip( array( 'id', 'title', 'url', 'type', 'status', 'modified', 'role' ) ) ),
-				$found['items']
-			),
-		);
-	}
-
-	/**
-	 * @return array<string, mixed>
-	 */
-	private function list_templates(): array {
-		return array(
-			'templates' => array_map(
-				static fn ( array $item ): array => array_intersect_key( $item, array_flip( array( 'key', 'label', 'url', 'count' ) ) ),
-				Templates::listing()
-			),
-			'hint'      => 'Use scope "template" with one of these keys to change every item rendered by that template.',
-		);
-	}
-
-	/**
-	 * @param array<string, mixed> $args Arguments.
-	 * @return array<string, mixed>
-	 */
-	private function get_page( array $args ): array {
-		$doc  = $this->working_doc();
-		$page = isset( $args['url'] ) ? VisualEdits::page_key_for_url( (string) $args['url'] ) : null;
-		$tpl  = isset( $args['template'] ) ? (string) $args['template'] : '';
-
-		$matches = static fn ( array $item ): bool => 'site' === $item['scope']
-			|| ( 'page' === $item['scope'] && null !== $page && $item['page'] === $page )
-			|| ( 'template' === $item['scope'] && '' !== $tpl && ( $item['tpl'] ?? '' ) === $tpl );
-
-		$edits = array_values( array_filter( $doc['edits'], $matches ) );
-
-		return array(
-			'page'     => $page,
-			'template' => '' !== $tpl ? $tpl : null,
-			'seo'      => array(
-				'page'     => null !== $page ? ( $doc['seo'][ $page ] ?? null ) : null,
-				'template' => '' !== $tpl ? ( $doc['seo'][ 'tpl:' . $tpl ] ?? null ) : null,
-			),
-			'edits'    => array_map(
-				static fn ( array $edit ): array => array_filter(
-					array(
-						'id'       => $edit['id'],
-						'scope'    => $edit['scope'],
-						'selector' => $edit['sel'],
-						'styles'   => $edit['styles'] ?: null,
-						'states'   => $edit['states'] ?? null,
-						'css'      => '' !== $edit['css'] ? $edit['css'] : null,
-						'text'     => $edit['text'] ?? null,
-						'html'     => $edit['html'] ?? null,
-						'attrs'    => $edit['attrs'] ?? null,
-					),
-					static fn ( $value ): bool => null !== $value
-				),
-				$edits
-			),
-			'ops'      => array_values( array_filter( $doc['ops'], $matches ) ),
-			'note'     => 'Showing the proposed draft where one exists, otherwise the live document.',
-		);
-	}
-
-	/**
-	 * @param array<string, mixed> $args Arguments.
-	 * @return array<string, mixed>
-	 */
-	private function get_outline( array $args ): array {
-		$outline = Outline::build( (string) ( $args['url'] ?? '' ), max( 20, min( 600, (int) ( $args['max_nodes'] ?? 250 ) ) ) );
-		if ( is_wp_error( $outline ) ) {
-			throw new \RuntimeException( $outline->get_error_message() );
+		$lines = array( sprintf( '%d found, page %d of %d', $found['total'], max( 1, (int) ( $args['page'] ?? 1 ) ), $found['pages'] ) );
+		foreach ( $found['items'] as $item ) {
+			$lines[] = sprintf(
+				'%d %s %s %s%s%s',
+				$item['id'],
+				$item['type'],
+				(string) wp_json_encode( $item['title'], JSON_UNESCAPED_UNICODE ),
+				wp_make_link_relative( $item['url'] ),
+				'publish' === $item['status'] ? '' : ' (' . $item['status'] . ')',
+				'' !== $item['role'] ? ' [' . $item['role'] . ']' : ''
+			);
 		}
 
-		return $outline;
+		return implode( "\n", $lines );
 	}
 
 	/**
-	 * @return array<string, mixed>
+	 * A page as short lines ("n12 h2.title "Tours""), indented by depth. The ids stand for the long selectors,
+	 * which stay on the server (10 minutes, last outline only) and are accepted by edit.
+	 *
+	 * @param array<string, mixed> $args Arguments.
 	 */
-	private function list_components(): array {
-		return array( 'components' => $this->working_doc()['components'] );
+	private function outline( array $args ): string {
+		$built = Outline::build( (string) ( $args['url'] ?? '' ), max( 20, min( 600, (int) ( $args['max_nodes'] ?? 120 ) ) ) );
+		if ( is_wp_error( $built ) ) {
+			throw new \RuntimeException( $built->get_error_message() );
+		}
+
+		$find  = strtolower( trim( (string) ( $args['find'] ?? '' ) ) );
+		$map   = array();
+		$lines = array();
+		foreach ( array_values( $built['nodes'] ) as $index => $node ) {
+			$id         = 'n' . ( $index + 1 );
+			$map[ $id ] = $node['selector'];
+
+			$text  = isset( $node['text'] ) ? ' "' . mb_substr( $node['text'], 0, 60 ) . '"' : '';
+			$extra = '';
+			foreach ( array( 'href', 'src', 'alt' ) as $attr ) {
+				if ( isset( $node[ $attr ] ) ) {
+					$extra .= ' ' . $attr . '=' . mb_substr( $node[ $attr ], 0, 60 );
+				}
+			}
+			// Bare wrappers say nothing; they keep their number so the other ids stay stable.
+			if ( in_array( $node['tag'], array( 'div', 'span' ), true ) && ! isset( $node['id'] ) && ! isset( $node['classes'] ) && '' === $text . $extra ) {
+				continue;
+			}
+
+			$line = $id . ' ' . $node['tag'] . ( isset( $node['id'] ) ? '#' . $node['id'] : '' ) . ( isset( $node['classes'] ) ? '.' . implode( '.', array_slice( $node['classes'], 0, 4 ) ) : '' ) . $extra . $text;
+			if ( '' !== $find && ! str_contains( strtolower( $line ), $find ) ) {
+				continue;
+			}
+			$lines[] = str_repeat( ' ', min( 6, (int) $node['depth'] ) ) . $line;
+		}
+		set_transient( self::OUTLINE, array( 'map' => $map ), 10 * MINUTE_IN_SECONDS );
+
+		array_unshift( $lines, '# ' . $built['title'] . ' — ' . count( $built['nodes'] ) . ' elements' . ( $built['truncated'] ? ' (cut off: raise max_nodes or use find)' : '' ) . '. Use the nN ids as selector in edit.' );
+
+		return implode( "\n", $lines );
 	}
 
 	/* ------------------------------------------------------------------ writing */
@@ -421,6 +424,12 @@ final class Mcp {
 	 * @return array<string, mixed>
 	 */
 	private function write( callable $change ): array {
+		if ( null !== $this->batch ) {
+			$this->batch[] = $change; // edit() applies them all at once.
+
+			return array();
+		}
+
 		return $this->edits->locked(
 			function () use ( $change ): array {
 				$doc = $this->working_doc();
@@ -436,7 +445,7 @@ final class Mcp {
 				if ( in_array( Api::settings()['level'], array( 'live', 'full' ), true ) ) {
 					$this->edits->store( $clean );
 
-					return array( 'site' => Api::site(), 'applied' => 'live', 'note' => 'The change is live. The previous version is kept as a revision.' );
+					return array( 'site' => Api::site(), 'applied' => 'live', 'revision' => true );
 				}
 
 				$this->edits->set_draft( $clean );
@@ -445,7 +454,6 @@ final class Mcp {
 					'site'    => Api::site(),
 					'applied' => 'draft',
 					'pending' => self::difference( $this->edits->get(), $clean ),
-					'note'    => 'Saved as a draft. An administrator reviews and publishes it in the visual editor.',
 				);
 			}
 		);
@@ -479,7 +487,7 @@ final class Mcp {
 		} elseif ( 'template' === $scope ) {
 			$tpl = (string) preg_replace( '/[^A-Za-z0-9:_\-.\/]/', '', (string) ( $args['template'] ?? '' ) );
 			if ( '' === $tpl ) {
-				throw new \RuntimeException( 'scope "template" needs a template key (see list_templates).' );
+				throw new \RuntimeException( 'scope "template" needs a template key (see site).' );
 			}
 		}
 
@@ -487,6 +495,16 @@ final class Mcp {
 	}
 
 	private function selector( mixed $value ): string {
+		$key = is_string( $value ) ? trim( $value ) : '';
+		if ( 1 === preg_match( '/^n\d+$/', $key ) ) {
+			$saved = get_transient( self::OUTLINE );
+			if ( ! is_array( $saved ) || ! isset( $saved['map'][ $key ] ) ) {
+				throw new \RuntimeException( 'Unknown id ' . $key . ': call outline again (ids last 10 minutes and belong to the last outline).' );
+			}
+
+			return (string) $saved['map'][ $key ];
+		}
+
 		$sel = Guard::selector( $value );
 		if ( null === $sel ) {
 			throw new \RuntimeException( 'That selector is not allowed. Use plain CSS selectors without braces, semicolons or comments.' );
@@ -723,7 +741,7 @@ final class Mcp {
 		if ( isset( $args['template'] ) ) {
 			$tpl = (string) preg_replace( '/[^A-Za-z0-9:_\-.\/]/', '', (string) $args['template'] );
 			if ( '' === $tpl ) {
-				throw new \RuntimeException( 'template is not a valid template key (see list_templates).' );
+				throw new \RuntimeException( 'template is not a valid template key (see site).' );
 			}
 			$key = 'tpl:' . $tpl;
 		} else {
@@ -796,6 +814,62 @@ final class Mcp {
 		return array( 'discarded' => true );
 	}
 
+	/**
+	 * Several changes in one call: all are checked first, then applied together (one lock, one revision).
+	 *
+	 * @param array<string, mixed> $args Arguments.
+	 * @return array<string, mixed>
+	 */
+	private function edit( array $args ): array {
+		$changes = is_array( $args['changes'] ?? null ) ? array_values( $args['changes'] ) : array();
+		if ( array() === $changes || count( $changes ) > 40 ) {
+			throw new \RuntimeException( 'Give 1 to 40 changes.' );
+		}
+		$ops = array(
+			'style'     => 'set_style',
+			'css'       => 'add_css',
+			'content'   => 'set_content',
+			'insert'    => 'insert_html',
+			'remove'    => 'remove_element',
+			'seo'       => 'set_seo',
+			'component' => 'save_component',
+		);
+		if ( 'discard' === ( $changes[0]['op'] ?? '' ) ) {
+			if ( count( $changes ) > 1 ) {
+				throw new \RuntimeException( 'discard must be the only change.' );
+			}
+
+			return $this->discard_draft();
+		}
+
+		$top         = array_intersect_key( $args, array_flip( array( 'scope', 'url', 'template' ) ) );
+		$this->batch = array();
+		try {
+			foreach ( $changes as $index => $change ) {
+				$op = is_array( $change ) ? (string) ( $change['op'] ?? '' ) : '';
+				if ( ! isset( $ops[ $op ] ) ) {
+					throw new \RuntimeException( 'change ' . ( $index + 1 ) . ': op must be ' . implode( ', ', array_keys( $ops ) ) . ' (or discard, alone).' );
+				}
+				try {
+					$this->{$ops[ $op ]}( $change + $top );
+				} catch ( \RuntimeException $error ) {
+					throw new \RuntimeException( 'change ' . ( $index + 1 ) . ' (' . $op . '): ' . $error->getMessage() . ' Nothing was applied.' );
+				}
+			}
+			$queued = $this->batch;
+		} finally {
+			$this->batch = null;
+		}
+
+		return $this->write(
+			static function ( array &$doc ) use ( $queued ): void {
+				foreach ( $queued as $apply ) {
+					$apply( $doc );
+				}
+			}
+		) + array( 'changes' => count( $queued ) );
+	}
+
 	/* ------------------------------------------------------------------ REST bridge (Full access) */
 
 	private function require_full(): void {
@@ -816,6 +890,9 @@ final class Mcp {
 	 * @return array<string, mixed>
 	 */
 	private function wp( array $args ): array {
+		if ( '' === trim( (string) ( $args['path'] ?? '' ) ) ) {
+			return $this->routes( $args );
+		}
 		$method = strtoupper( (string) ( $args['method'] ?? 'GET' ) );
 		if ( ! in_array( $method, array( 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS' ), true ) ) {
 			throw new \RuntimeException( 'Unknown method.' );

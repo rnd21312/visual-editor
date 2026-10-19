@@ -21,6 +21,10 @@ final class Outline {
 	 * @return array{url: string, title: string, nodes: array<int, array<string, mixed>>, truncated: bool}|\WP_Error
 	 */
 	public static function build( string $url, int $max = 250 ) {
+		// A path such as /about/ means a page of this site.
+		if ( str_starts_with( $url, '/' ) && ! str_starts_with( $url, '//' ) ) {
+			$url = (string) preg_replace( '#^(https?://[^/]+).*#', '$1', home_url() ) . $url;
+		}
 		$host = (string) wp_parse_url( home_url(), PHP_URL_HOST );
 		if ( (string) wp_parse_url( $url, PHP_URL_HOST ) !== $host ) {
 			return new \WP_Error( 'sve_outline_host', 'Only pages of this site can be read.' );

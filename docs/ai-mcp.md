@@ -43,31 +43,24 @@ Full access is as powerful as an administrator login. Deleting content and chang
 
 ## Tools
 
+Six tools, kept short on purpose: the tool list is sent to the AI at the start of every session (about 770 tokens), and results are compact.
+
 | Tool | Purpose |
 | --- | --- |
-| `status` | Key permissions, request limits, number of changes waiting for approval |
-| `list_pages` | Find pages, posts, products… (`search`, `type`, `page`) |
-| `list_templates` | Theme templates (single product, single post, category archive…) with a sample URL each |
-| `get_page` | Everything already changed for a URL (page, template and site-wide) |
-| `get_outline` | Map of a page: every visible tag with CSS selector, classes and text (built from server-rendered HTML; `max_nodes` ≤ 600) |
-| `list_components` | Saved reusable components |
-| `set_style` | Set CSS properties for a selector (per device and state) |
-| `add_css` | Add custom CSS for a selector |
-| `set_content` | Change text, links, image URLs, attributes |
-| `insert_html` | Insert sanitised HTML next to an element |
-| `remove_element` | Remove an element |
-| `set_seo` | Title, description, share image, canonical, robots, JSON-LD (page or template) |
-| `save_component` | Save a reusable component |
-| `discard_draft` | Throw away pending proposals |
-| `routes` | Find REST routes by a word in the path (e.g. `product`, `menu`) |
-| `wp` | Call a REST route (`method`, `path`, `params`, `fields`). Reads work at every level; changes need Full access |
-| `upload_media` | Add an image or file to the media library from a public URL (Full access) |
+| `site` | Overview: name, theme, plugins, post types, theme templates (with a sample path each), components, changes waiting for approval. With `url` or `template`, also what was already changed there |
+| `pages` | Find pages, posts, products… (`search`, `type`, `page`). One line each: id, type, title, path |
+| `outline` | Compact map of a page. One line per element with a short id (`n12 h2.title "Tours"`); `find` keeps only matching lines, `max_nodes` ≤ 600 (default 120) |
+| `edit` | One or more changes in a single call, applied together or not at all (one revision): `style`, `css`, `content`, `insert`, `remove`, `seo`, `component`, `discard`. Scope `page`, `template` or `site` |
+| `wp` | WordPress REST API as the key's administrator. Reads work at every level; changes need Full access. Without `path`, `search` finds routes |
+| `upload_media` | Add a file to the media library from a public URL (Full access) |
+
+The short ids from `outline` stand for the long CSS selectors, which stay on the server (valid 10 minutes, for the last outline). `edit` takes an id or a CSS selector wherever it needs a selector.
 
 ## Typical prompt
 
 > "On the product template, make the *Add to cart* button 20 % larger with a rounded pill shape and set the SEO title to `%title% | %site%`."
 
-The assistant calls `list_templates` → `get_outline` → `set_style` + `set_seo`. In *Propose* mode you review the draft in the editor.
+The assistant calls `site` → `outline` (with `find: "cart"`) → one `edit` with a `style` and a `seo` change. In *Propose* mode you review the draft in the editor.
 
 ## Safety
 
