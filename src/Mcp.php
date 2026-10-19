@@ -375,28 +375,38 @@ final class Mcp {
 	 * @return array<string, mixed>
 	 */
 	private function write( callable $change ): array {
-		$doc = $this->working_doc();
-		$change( $doc );
+		return $this->edits->locked(
+			function () use ( $change ): array {
+				$doc = $this->working_doc();
+				$change( $doc );
 
-		if ( count( $doc['edits'] ) > self::MAX_EDITS || count( $doc['ops'] ) > self::MAX_EDITS ) {
-			throw new \RuntimeException( 'Too many changes on this site already. Remove some first.' );
-		}
+				if ( count( $doc['edits'] ) > self::MAX_EDITS || count( $doc['ops'] ) > self::MAX_EDITS ) {
+					throw new \RuntimeException( 'Too many changes on this site already. Remove some first.' );
+				}
 
-		$clean = $this->edits->sanitize( $doc );
-		$mode  = Api::settings()['level'];
-		if ( 'live' === $mode ) {
-			$this->edits->store( $clean );
+				// Trusted: the document's existing markup came from administrators, and the AI's own markup was
+				// filtered with self::markup() before it got here. Re-filtering would strip their embeds.
+				$clean = $this->edits->sanitize( $doc, true );
+				if ( 'live' === Api::settings()['level'] ) {
+					$this->edits->store( $clean );
 
-			return array( 'applied' => 'live', 'note' => 'The change is live. The previous version is kept as a revision.' );
-		}
+					return array( 'applied' => 'live', 'note' => 'The change is live. The previous version is kept as a revision.' );
+				}
 
-		$this->edits->set_draft( $clean );
+				$this->edits->set_draft( $clean );
 
-		return array(
-			'applied' => 'draft',
-			'pending' => self::difference( $this->edits->get(), $clean ),
-			'note'    => 'Saved as a draft. An administrator reviews and publishes it in the visual editor.',
+				return array(
+					'applied' => 'draft',
+					'pending' => self::difference( $this->edits->get(), $clean ),
+					'note'    => 'Saved as a draft. An administrator reviews and publishes it in the visual editor.',
+				);
+			}
 		);
+	}
+
+	/** Markup from the AI: never scripts, event handlers or anything else posts may not contain. */
+	private static function markup( mixed $value ): string {
+		return wp_kses_post( is_string( $value ) ? $value : '' );
 	}
 
 	/**
@@ -575,7 +585,7 @@ final class Mcp {
 			$attrs[ strtolower( (string) $name ) ] = null === $value ? null : (string) $value;
 		}
 		$text = isset( $args['text'] ) ? (string) $args['text'] : null;
-		$html = isset( $args['html'] ) ? (string) $args['html'] : null;
+		$html = isset( $args['html'] ) ? self::markup( $args['html'] ) : null;
 		if ( null === $text && null === $html && array() === $attrs ) {
 			throw new \RuntimeException( 'Give text, html or attrs.' );
 		}
@@ -631,7 +641,7 @@ final class Mcp {
 		if ( ! in_array( $position, array( 'before', 'after', 'prepend', 'append' ), true ) ) {
 			throw new \RuntimeException( 'position must be before, after, prepend or append.' );
 		}
-		$html = (string) ( $args['html'] ?? '' );
+		$html = self::markup( $args['html'] ?? '' );
 		if ( '' === trim( $html ) || strlen( $html ) > 50000 ) {
 			throw new \RuntimeException( 'html is empty or too long.' );
 		}
@@ -702,7 +712,7 @@ final class Mcp {
 	 */
 	private function save_component( array $args ): array {
 		$name = trim( (string) ( $args['name'] ?? '' ) );
-		$html = (string) ( $args['html'] ?? '' );
+		$html = self::markup( $args['html'] ?? '' );
 		if ( '' === $name || '' === trim( $html ) ) {
 			throw new \RuntimeException( 'name and html are required.' );
 		}

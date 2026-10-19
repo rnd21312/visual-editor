@@ -20,6 +20,9 @@ final class Api {
 
 	public const OPTION = 'sve_api';
 
+	/** Usage stats live apart from the key: touch() runs on every call and must never write the hash back. */
+	public const USAGE = 'sve_api_usage';
+
 	public const READS_PER_MINUTE = 120;
 
 	public const WRITES_PER_MINUTE = 30;
@@ -35,7 +38,8 @@ final class Api {
 	 */
 	public static function settings(): array {
 		$saved = get_option( self::OPTION, array() );
-		$saved = is_array( $saved ) ? $saved : array();
+		$usage = get_option( self::USAGE, array() );
+		$saved = array_merge( is_array( $saved ) ? $saved : array(), is_array( $usage ) ? $usage : array() );
 
 		return array(
 			'enabled'   => ! empty( $saved['enabled'] ),
@@ -52,7 +56,7 @@ final class Api {
 	 * @param array<string, mixed> $change Fields to overwrite.
 	 */
 	private static function write( array $change ): void {
-		update_option( self::OPTION, array_merge( self::settings(), $change ), false );
+		update_option( self::OPTION, array_diff_key( array_merge( self::settings(), $change ), array_flip( array( 'last_used', 'calls' ) ) ), false );
 	}
 
 	public static function endpoint(): string {
@@ -100,14 +104,13 @@ final class Api {
 		$key = 'sve_' . bin2hex( random_bytes( 24 ) );
 		self::write(
 			array(
-				'enabled'   => true,
-				'hash'      => self::hash( $key ),
-				'hint'      => '…' . substr( $key, -4 ),
-				'created'   => time(),
-				'last_used' => 0,
-				'calls'     => 0,
+				'enabled' => true,
+				'hash'    => self::hash( $key ),
+				'hint'    => '…' . substr( $key, -4 ),
+				'created' => time(),
 			)
 		);
+		delete_option( self::USAGE );
 
 		return $key;
 	}
@@ -189,7 +192,6 @@ final class Api {
 	 * Remembers that the key was used (shown in the settings screen).
 	 */
 	public static function touch(): void {
-		$s = self::settings();
-		self::write( array( 'last_used' => time(), 'calls' => $s['calls'] + 1 ) );
+		update_option( self::USAGE, array( 'last_used' => time(), 'calls' => self::settings()['calls'] + 1 ), false );
 	}
 }
