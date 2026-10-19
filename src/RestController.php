@@ -56,6 +56,7 @@ final class RestController {
 		);
 
 		register_rest_route( self::NS, '/admin/revisions', array( 'methods' => WP_REST_Server::READABLE, 'callback' => fn (): WP_REST_Response => new WP_REST_Response( $this->edits->revisions() ), 'permission_callback' => $admin ) );
+		register_rest_route( self::NS, '/admin/log', array( 'methods' => WP_REST_Server::READABLE, 'callback' => fn (): WP_REST_Response => new WP_REST_Response( array_reverse( Api::log_entries() ) ), 'permission_callback' => $admin ) );
 		register_rest_route( self::NS, '/admin/revisions/(?P<id>\d+)/restore', array( 'methods' => WP_REST_Server::CREATABLE, 'callback' => array( $this, 'restore' ), 'permission_callback' => $admin ) );
 
 		register_rest_route(
@@ -160,6 +161,9 @@ final class RestController {
 		if ( is_wp_error( $auth ) ) {
 			return $this->error_response( $auth );
 		}
+
+		// From here on the request is the administrator the key belongs to: WordPress itself decides what is allowed.
+		wp_set_current_user( Api::acting_user() );
 
 		$body = (string) $request->get_body();
 		if ( strlen( $body ) > Api::MAX_BODY ) {

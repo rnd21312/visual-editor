@@ -35,7 +35,10 @@ The endpoint speaks JSON-RPC 2.0 (`initialize`, `ping`, `tools/list`, `tools/cal
 | --- | --- |
 | **Read only** | Inspect pages, templates, outlines and components |
 | **Propose changes — I approve them** *(default)* | Changes are written to a **draft**; a banner in the editor lets you review, edit and Save (or discard) |
-| **Edit live** | Changes are applied immediately; each live save keeps a revision you can restore |
+| **Edit live** | Editor changes (styles, text, elements, SEO) are applied immediately; each live save keeps a revision you can restore |
+| **Full access** | Everything above, plus the whole WordPress REST API **as the administrator who created the key**: posts and pages, media, menus, settings, users, plugins, themes, WooCommerce and any plugin that has REST routes |
+
+Full access is as powerful as an administrator login. Deleting content and changing users may not be undoable, and the AI reads your site's content (comments, reviews), which can contain text written to trick it. Use it only with an assistant you trust. Even then the key can never reach this plugin's own admin API (so it cannot create or change keys) or application passwords (they would outlive the key), and it never runs PHP or edits theme and plugin files. Every change is listed in `GET /sve/v1/admin/log`.
 
 ## Tools
 
@@ -55,6 +58,9 @@ The endpoint speaks JSON-RPC 2.0 (`initialize`, `ping`, `tools/list`, `tools/cal
 | `set_seo` | Title, description, share image, canonical, robots, JSON-LD (page or template) |
 | `save_component` | Save a reusable component |
 | `discard_draft` | Throw away pending proposals |
+| `routes` | Find REST routes by a word in the path (e.g. `product`, `menu`) |
+| `wp` | Call a REST route (`method`, `path`, `params`, `fields`). Reads work at every level; changes need Full access |
+| `upload_media` | Add an image or file to the media library from a public URL (Full access) |
 
 ## Typical prompt
 

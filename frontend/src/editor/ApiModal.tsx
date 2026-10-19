@@ -19,7 +19,8 @@ type Props = {
 const LEVELS: { value: ApiStatus['level']; label: string; hint: string }[] = [
   { value: 'read', label: 'Read only', hint: 'The AI can look at pages and settings but change nothing.' },
   { value: 'draft', label: 'Propose changes — I approve them (recommended)', hint: 'Changes are saved as a draft. Nothing goes live until you review and save them here.' },
-  { value: 'live', label: 'Edit live', hint: 'Changes are published immediately. Every one keeps a version you can restore.' },
+  { value: 'live', label: 'Edit live', hint: 'Editor changes (styles, text, SEO) are published immediately. Every one keeps a version you can restore.' },
+  { value: 'full', label: 'Full access — everything an administrator can do', hint: 'Also content, media, menus, settings, users, plugins and WooCommerce through the REST API, acting as you. Deleting and user changes may not be undoable. Use only with an assistant you trust.' },
 ];
 
 const when = (seconds: number): string => (seconds ? new Date(seconds * 1000).toLocaleString() : '—');
@@ -126,8 +127,8 @@ export const ApiModal = ({ api, initial, onRestore, onPreviewDraft, onDiscardDra
         <div className="ve-api__body">
           <p className="ve-note">
             Lets AI assistants (Claude, ChatGPT-style agents, any MCP client) browse your pages and templates and edit them
-            through this editor: styles, text, new elements, SEO. It uses the same checks as the editor itself — no PHP, no
-            scripts, no access to anything outside the editor.
+            through this editor: styles, text, new elements, SEO. Below &ldquo;Full access&rdquo; it can only change the editor document;
+            it never runs PHP or edits theme and plugin files, at any level.
           </p>
 
           {error && <p className="ve-hint ve-hint--warn">{error}</p>}

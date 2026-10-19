@@ -8,7 +8,7 @@ export type TemplateEntry = { key: string; label: string; url: string; count: nu
 
 export type ApiStatus = {
   enabled: boolean;
-  level: 'read' | 'draft' | 'live';
+  level: 'read' | 'draft' | 'live' | 'full';
   hasKey: boolean;
   keyHint: string;
   /** Owner's description of the site, given to the AI so it knows what this site is. */

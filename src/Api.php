@@ -23,6 +23,8 @@ final class Api {
 	/** Usage stats live apart from the key: touch() runs on every call and must never write the hash back. */
 	public const USAGE = 'sve_api_usage';
 
+	public const LOG = 'sve_api_log';
+
 	public const READS_PER_MINUTE = 120;
 
 	public const WRITES_PER_MINUTE = 30;
@@ -43,10 +45,11 @@ final class Api {
 
 		return array(
 			'enabled'   => ! empty( $saved['enabled'] ),
-			'level'     => in_array( $saved['level'] ?? '', array( 'read', 'draft', 'live' ), true ) ? (string) $saved['level'] : 'draft',
+			'level'     => in_array( $saved['level'] ?? '', array( 'read', 'draft', 'live', 'full' ), true ) ? (string) $saved['level'] : 'draft',
 			'hash'      => (string) ( $saved['hash'] ?? '' ),
 			'hint'      => (string) ( $saved['hint'] ?? '' ),
 			'about'     => (string) ( $saved['about'] ?? '' ),
+			'user'      => (int) ( $saved['user'] ?? 0 ),
 			'created'   => (int) ( $saved['created'] ?? 0 ),
 			'last_used' => (int) ( $saved['last_used'] ?? 0 ),
 			'calls'     => (int) ( $saved['calls'] ?? 0 ),
@@ -110,7 +113,7 @@ final class Api {
 		self::write(
 			array(
 				'enabled' => $enabled,
-				'level'   => in_array( $level, array( 'read', 'draft', 'live' ), true ) ? $level : 'draft',
+				'level'   => in_array( $level, array( 'read', 'draft', 'live', 'full' ), true ) ? $level : 'draft',
 			) + ( null === $about ? array() : array( 'about' => substr( sanitize_textarea_field( $about ), 0, 500 ) ) )
 		);
 	}
@@ -126,6 +129,7 @@ final class Api {
 				'hash'    => self::hash( $key ),
 				'hint'    => '…' . substr( $key, -4 ),
 				'created' => time(),
+				'user'    => get_current_user_id(), // The AI acts as the administrator who made the key.
 			)
 		);
 		delete_option( self::USAGE );
@@ -169,6 +173,10 @@ final class Api {
 		// The right key always gets in: the key is 192 random bits, and a lockout keyed on the IP must not
 		// shut out the real client when someone else behind the same address guesses wrong.
 		if ( '' !== $token && hash_equals( $settings['hash'], self::hash( $token ) ) ) {
+			if ( self::acting_user() <= 0 ) {
+				return new WP_Error( 'sve_no_admin', 'The key belongs to a user who is no longer an administrator.', array( 'status' => 403 ) );
+			}
+
 			return true;
 		}
 
@@ -209,6 +217,36 @@ final class Api {
 		}
 
 		return null;
+	}
+
+	/**
+	 * The administrator the key acts as (the one who created it, or the first administrator for older keys), or 0
+	 * when that user is gone or no longer administers the site.
+	 */
+	public static function acting_user(): int {
+		$id = self::settings()['user'];
+		if ( $id <= 0 ) {
+			$admins = get_users( array( 'role' => 'administrator', 'number' => 1, 'fields' => 'ID', 'orderby' => 'ID' ) );
+			$id     = (int) ( $admins[0] ?? 0 );
+		}
+
+		return $id > 0 && user_can( $id, 'manage_options' ) ? $id : 0;
+	}
+
+	/**
+	 * What the AI changed, newest last (the last 200 entries).
+	 *
+	 * @return array<int, array{t: int, what: string}>
+	 */
+	public static function log_entries(): array {
+		$log = get_option( self::LOG, array() );
+
+		return is_array( $log ) ? $log : array();
+	}
+
+	public static function log( string $what ): void {
+		// ponytail: option ring buffer; move to a table if more history than 200 entries is needed.
+		update_option( self::LOG, array_slice( array_merge( self::log_entries(), array( array( 't' => time(), 'what' => mb_substr( $what, 0, 300 ) ) ) ), -200 ), false );
 	}
 
 	/**

@@ -58,7 +58,9 @@ final class Mcp {
 			case 'ping':
 				return $reply( array() );
 			case 'tools/list':
-				return $reply( array( 'tools' => array_map( static fn ( array $tool ): array => array_diff_key( $tool, array( 'write' => 1 ) ), $this->tools() ) ) );
+				$full = 'full' === Api::settings()['level'];
+
+				return $reply( array( 'tools' => array_values( array_map( static fn ( array $tool ): array => array_diff_key( $tool, array( 'write' => 1 ) ), array_filter( $this->tools(), static fn ( array $tool ): bool => $full || 'upload_media' !== $tool['name'] ) ) ) ) );
 			case 'tools/call':
 				if ( ! in_array( (string) ( $params['name'] ?? '' ), array_column( $this->tools(), 'name' ), true ) ) {
 					return $fail( -32602, 'Unknown tool: ' . (string) ( $params['name'] ?? '' ) );
@@ -80,6 +82,9 @@ final class Mcp {
 			return false;
 		}
 		$name = (string) ( $message['params']['name'] ?? '' );
+		if ( 'wp' === $name ) {
+			return ! in_array( strtoupper( (string) ( $message['params']['arguments']['method'] ?? 'GET' ) ), array( 'GET', 'OPTIONS' ), true );
+		}
 		foreach ( $this->tools() as $tool ) {
 			if ( $tool['name'] === $name ) {
 				return ! empty( $tool['write'] );
@@ -104,6 +109,7 @@ final class Mcp {
 				'Scopes: "page" = one URL, "template" = every item rendered by one theme template (a product page, a blog post, a category…) — use it instead of editing each product or post, "site" = everywhere (header, footer, global styles).',
 				'Prefer stable selectors from get_outline or short class selectors (.btn) over long paths. Responsive: device base|tablet|mobile. States: normal|hover|focus|active.',
 				'This key is: ' . ( 'read' === $level ? 'READ-ONLY.' : ( 'draft' === $level ? 'allowed to PROPOSE changes: they are saved as a draft that an administrator reviews and publishes in the editor.' : 'allowed to edit LIVE (every change keeps a revision).' ) ),
+				'full' === $level ? 'FULL ACCESS: tool wp reaches everything the REST API offers as an administrator (content, media, menus, settings, users, plugins, WooCommerce). Use routes to find paths. Be careful: deleting and user changes cannot always be undone.' : '',
 				)
 			)
 		);
@@ -206,6 +212,26 @@ final class Mcp {
 				'write'       => true,
 				'inputSchema' => $object( array() ),
 			),
+			array(
+				'name'        => 'wp',
+				'description' => 'Call the WordPress REST API as this key\'s administrator: posts, pages, media, menus, settings, users, plugins, themes, WooCommerce and any plugin with REST routes. Reads (GET, OPTIONS) work at every level; changes need "Full access". Use routes to find paths and OPTIONS to see a route\'s arguments.',
+				'inputSchema' => $object(
+					array(
+						'method' => array( 'type' => 'string', 'enum' => array( 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS' ) ),
+						'path'   => $string( 'Route, e.g. /wp/v2/posts or /wc/v3/products/12' ),
+						'params' => array( 'type' => 'object', 'description' => 'Query (GET) or JSON body (other methods)' ),
+						'fields' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ), 'description' => 'Only these fields (saves tokens), e.g. ["id","title"]' ),
+					),
+					array( 'path' )
+				),
+			),
+			array( 'name' => 'routes', 'description' => 'Find REST routes of this site by a word in the path (e.g. "product", "menu"). Shows the methods each accepts.', 'inputSchema' => $object( array( 'search' => $string( 'Word in the route path' ) ) ) ),
+			array(
+				'name'        => 'upload_media',
+				'description' => 'Add an image or file to the media library from a public URL. Returns the attachment id and its URL.',
+				'write'       => true,
+				'inputSchema' => $object( array( 'url' => $string( 'Public https URL of the file' ), 'title' => $string( 'Title' ), 'alt' => $string( 'Alt text' ), 'post_id' => array( 'type' => 'integer', 'description' => 'Attach to this post' ) ), array( 'url' ) ),
+			),
 		);
 	}
 
@@ -240,8 +266,14 @@ final class Mcp {
 				'set_seo'         => $this->set_seo( $args ),
 				'save_component'  => $this->save_component( $args ),
 				'discard_draft'   => $this->discard_draft(),
+				'wp'              => $this->wp( $args ),
+				'routes'          => $this->routes( $args ),
+				'upload_media'    => $this->upload_media( $args ),
 				default           => throw new \RuntimeException( 'Unknown tool: ' . $name ),
 			};
+			if ( $write ) {
+				Api::log( $name . ' ' . (string) wp_json_encode( $args, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
+			}
 
 			return array( 'content' => array( array( 'type' => 'text', 'text' => (string) wp_json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) ) ) );
 		} catch ( \Throwable $error ) {
@@ -401,7 +433,7 @@ final class Mcp {
 				// Trusted: the document's existing markup came from administrators, and the AI's own markup was
 				// filtered with self::markup() before it got here. Re-filtering would strip their embeds.
 				$clean = $this->edits->sanitize( $doc, true );
-				if ( 'live' === Api::settings()['level'] ) {
+				if ( in_array( Api::settings()['level'], array( 'live', 'full' ), true ) ) {
 					$this->edits->store( $clean );
 
 					return array( 'site' => Api::site(), 'applied' => 'live', 'note' => 'The change is live. The previous version is kept as a revision.' );
@@ -762,6 +794,144 @@ final class Mcp {
 		$this->edits->set_draft( null );
 
 		return array( 'discarded' => true );
+	}
+
+	/* ------------------------------------------------------------------ REST bridge (Full access) */
+
+	private function require_full(): void {
+		if ( 'full' !== Api::settings()['level'] ) {
+			throw new \RuntimeException( 'This needs the "Full access" level. An administrator can change it in the editor settings.' );
+		}
+	}
+
+	/** Routes AI keys never reach: this plugin's own admin API (keys!) and per-user application passwords (they outlive the key). */
+	public static function route_allowed( string $path ): bool {
+		$path = '/' . trim( (string) preg_replace( '#/+#', '/', $path ), '/' );
+
+		return 1 !== preg_match( '#^/sve/v1(/|$)|/application-passwords(/|$)#i', $path );
+	}
+
+	/**
+	 * @param array<string, mixed> $args Arguments.
+	 * @return array<string, mixed>
+	 */
+	private function wp( array $args ): array {
+		$method = strtoupper( (string) ( $args['method'] ?? 'GET' ) );
+		if ( ! in_array( $method, array( 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS' ), true ) ) {
+			throw new \RuntimeException( 'Unknown method.' );
+		}
+		$read = in_array( $method, array( 'GET', 'OPTIONS' ), true );
+		if ( ! $read ) {
+			$this->require_full();
+		}
+
+		$parts = (array) wp_parse_url( (string) ( $args['path'] ?? '' ) );
+		$path  = '/' . trim( (string) preg_replace( '#^/?wp-json#', '', (string) ( $parts['path'] ?? '' ) ), '/' );
+		parse_str( (string) ( $parts['query'] ?? '' ), $query );
+		if ( '/' === $path || ! self::route_allowed( $path ) ) {
+			throw new \RuntimeException( 'That route is not available to AI keys.' );
+		}
+
+		$params  = is_array( $args['params'] ?? null ) ? $args['params'] : array();
+		$request = new \WP_REST_Request( $method, $path );
+		$request->set_query_params( $read ? $query + $params : $query );
+		if ( ! $read ) {
+			$request->set_header( 'content-type', 'application/json' );
+			$request->set_body( (string) wp_json_encode( $params ) );
+		}
+		if ( is_array( $args['fields'] ?? null ) && array() !== $args['fields'] ) {
+			$request->set_param( '_fields', implode( ',', array_map( 'strval', $args['fields'] ) ) );
+		}
+
+		if ( ! $read ) {
+			Api::log( 'wp ' . $method . ' ' . $path . ' ' . mb_substr( (string) wp_json_encode( $params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ), 0, 150 ) );
+		}
+		$response = rest_do_request( $request );
+		$data     = self::strip_links( rest_get_server()->response_to_data( $response, false ) );
+		if ( $response->is_error() ) {
+			throw new \RuntimeException( ( is_array( $data ) ? (string) ( $data['code'] ?? 'error' ) . ': ' . (string) ( $data['message'] ?? '' ) : 'error' ) . ' (HTTP ' . $response->get_status() . ')' );
+		}
+
+		$json = (string) wp_json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+		if ( strlen( $json ) > 40000 ) {
+			return array( 'truncated' => true, 'bytes' => strlen( $json ), 'hint' => 'Too large: use fields, per_page, or a narrower path.', 'head' => substr( $json, 0, 6000 ) );
+		}
+		$headers = $response->get_headers();
+
+		return array_filter(
+			array(
+				'status' => $response->get_status(),
+				'total'  => isset( $headers['X-WP-Total'] ) ? (int) $headers['X-WP-Total'] : null,
+				'pages'  => isset( $headers['X-WP-TotalPages'] ) ? (int) $headers['X-WP-TotalPages'] : null,
+				'data'   => $data,
+			),
+			static fn ( $value ): bool => null !== $value
+		);
+	}
+
+	/** REST responses carry _links on every object: they cost tokens and say nothing new. */
+	private static function strip_links( mixed $value ): mixed {
+		if ( ! is_array( $value ) ) {
+			return $value;
+		}
+		unset( $value['_links'], $value['_embedded'] );
+
+		return array_map( array( self::class, 'strip_links' ), $value );
+	}
+
+	/**
+	 * @param array<string, mixed> $args Arguments.
+	 * @return array<string, mixed>
+	 */
+	private function routes( array $args ): array {
+		$needle = strtolower( (string) ( $args['search'] ?? '' ) );
+		$out    = array();
+		foreach ( rest_get_server()->get_routes() as $route => $handlers ) {
+			if ( '/' === $route || ! self::route_allowed( $route ) || ( '' !== $needle && ! str_contains( strtolower( $route ), $needle ) ) ) {
+				continue;
+			}
+			$methods = array();
+			foreach ( $handlers as $handler ) {
+				$methods += array_fill_keys( array_keys( (array) ( $handler['methods'] ?? array() ) ), true );
+			}
+			$out[] = implode( ',', array_keys( $methods ) ) . ' ' . $route;
+			if ( count( $out ) >= 80 ) {
+				break;
+			}
+		}
+
+		return array( 'routes' => $out, 'note' => count( $out ) >= 80 ? 'First 80 shown: add a more specific search.' : 'Call a route with wp; OPTIONS on it lists its arguments.' );
+	}
+
+	/**
+	 * @param array<string, mixed> $args Arguments.
+	 * @return array<string, mixed>
+	 */
+	private function upload_media( array $args ): array {
+		$this->require_full();
+		$url = esc_url_raw( (string) ( $args['url'] ?? '' ) );
+		if ( '' === $url || ! wp_http_validate_url( $url ) || ! current_user_can( 'upload_files' ) ) {
+			throw new \RuntimeException( 'Give a public URL (and the key\'s user must be allowed to upload).' );
+		}
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/media.php';
+		require_once ABSPATH . 'wp-admin/includes/image.php';
+
+		$tmp = download_url( $url, 30 ); // Refuses private addresses like wp_safe_remote_get.
+		if ( is_wp_error( $tmp ) ) {
+			throw new \RuntimeException( $tmp->get_error_message() );
+		}
+		$name = sanitize_file_name( basename( (string) wp_parse_url( $url, PHP_URL_PATH ) ) );
+		$id   = media_handle_sideload( array( 'name' => '' !== $name ? $name : 'upload', 'tmp_name' => $tmp ), (int) ( $args['post_id'] ?? 0 ), sanitize_text_field( (string) ( $args['title'] ?? '' ) ) );
+		if ( is_wp_error( $id ) ) {
+			wp_delete_file( $tmp );
+			throw new \RuntimeException( $id->get_error_message() );
+		}
+		if ( ! empty( $args['alt'] ) ) {
+			update_post_meta( $id, '_wp_attachment_image_alt', sanitize_text_field( (string) $args['alt'] ) );
+		}
+
+		return array( 'site' => Api::site(), 'id' => $id, 'url' => (string) wp_get_attachment_url( $id ) );
 	}
 
 	/**
