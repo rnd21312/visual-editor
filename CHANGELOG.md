@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [1.1.0]
+
+### Added
+- **Site transfer** (AI (MCP) → Site transfer): download the whole front end of a site as one JSON file and import it on another site. Included: Visual Editor document (styles, elements, components, tokens, libraries, scripts, SEO of pages), builder templates, pages and layout post types (Elementor library and kit, block theme templates and parts, reusable blocks, theme layouts) with their meta, menus and locations, widgets, theme customizer settings and theme/Elementor options, the front page and site icon. Not included: products, blog posts, orders, users, form entries, snippets, theme and plugin files.
+- Import copies the images into the new media library (originals, up to 400 files) and rewrites every address — also inside Elementor data — or keeps images loading from the old site. Pages with the same address are replaced or added as copies; the exported theme is switched to when installed.
+
 ## [1.0.2]
 
 ### Added (MCP)

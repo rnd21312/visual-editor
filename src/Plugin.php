@@ -20,6 +20,7 @@ final class Plugin {
 		Builder\Router::hooks();
 		EditorScreen::hooks();
 		AdminPage::hooks();
+		TransferPage::hooks();
 		( new OAuth() )->hooks();
 		add_action( 'init', array( Forms::class, 'register' ) );
 		add_action( 'rest_api_init', array( RestController::class, 'register_routes' ) );
