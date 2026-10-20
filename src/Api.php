@@ -300,10 +300,12 @@ final class Api {
 		}
 
 		$token = self::token( $request );
-		if ( '' !== $token ) {
-			$hash = self::hash( $token );
+		// "X-SVE-Key" also counts next to an Authorization header: mcp-remote puts its own OAuth token there.
+		$extra  = trim( (string) $request->get_header( 'x-sve-key' ) );
+		$hashes = array_map( array( self::class, 'hash' ), array_unique( array_filter( array( $token, $extra ) ) ) );
+		if ( array() !== $hashes ) {
 			foreach ( $settings['keys'] as $key ) {
-				if ( hash_equals( $key['hash'], $hash ) ) {
+				if ( array() !== array_filter( $hashes, static fn ( string $hash ): bool => hash_equals( $key['hash'], $hash ) ) ) {
 					self::$current = $key;
 					$user          = $key['user'] > 0 ? get_userdata( $key['user'] ) : false;
 					if ( ! $user || ! user_can( $user, 'manage_options' ) ) {

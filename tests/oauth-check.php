@@ -94,7 +94,7 @@ namespace {
 	assert( ! $exchange( $code, array( 'client_id' => 'sve_c_other' ) )['ok'], 'other app' );
 	$code   = OAuth::create_code( $id, 7, $uri, $challenge );
 	$tokens = $exchange( $code );
-	assert( $tokens['ok'] && 'Bearer' === $tokens['body']['token_type'] && 3600 === $tokens['body']['expires_in'] );
+	assert( $tokens['ok'] && 'Bearer' === $tokens['body']['token_type'] && 86400 === $tokens['body']['expires_in'] );
 	assert( ! $exchange( $code )['ok'], 'second use of the same code' );
 
 	// The access token identifies the administrator; nothing else does.
@@ -108,8 +108,21 @@ namespace {
 	// Refresh tokens rotate.
 	$next = OAuth::exchange( array( 'grant_type' => 'refresh_token', 'refresh_token' => $refresh, 'client_id' => $id ) );
 	assert( $next['ok'] && 7 === OAuth::grant( $next['body']['access_token'] )['u'] );
-	assert( ! OAuth::exchange( array( 'grant_type' => 'refresh_token', 'refresh_token' => $refresh, 'client_id' => $id ) )['ok'], 'old refresh token' );
+	$state = $GLOBALS['sve_store'][ OAuth::OPTION ];
+	assert( $state['tokens'][ hash( 'sha256', $refresh ) ]['e'] <= time() + 60, 'the old refresh token lives a minute longer at most' );
+	$state['tokens'][ hash( 'sha256', $refresh ) ]['e'] = time() - 1;
+	update_option( OAuth::OPTION, $state );
+	assert( ! OAuth::exchange( array( 'grant_type' => 'refresh_token', 'refresh_token' => $refresh, 'client_id' => $id ) )['ok'], 'old refresh token after the grace' );
 	assert( ! OAuth::exchange( array( 'grant_type' => 'refresh_token', 'refresh_token' => $next['body']['refresh_token'], 'client_id' => 'sve_c_other' ) )['ok'], 'refresh by another app' );
+	// Loopback addresses match on any port; other addresses only exactly.
+	assert( OAuth::uri_registered( 'http://127.0.0.1:5555/oauth/callback', array( 'http://127.0.0.1:37869/oauth/callback' ) ) );
+	assert( ! OAuth::uri_registered( 'http://127.0.0.1:5555/other', array( 'http://127.0.0.1:37869/oauth/callback' ) ) );
+	assert( ! OAuth::uri_registered( 'https://claude.ai/api/mcp/auth_callback2', array( $uri ) ) );
+	assert( ! OAuth::uri_registered( 'http://evil.example/oauth/callback', array( 'http://127.0.0.1:37869/oauth/callback' ) ) );
+	// A forgotten desktop client_id is adopted again, for loopback addresses only.
+	assert( ! isset( OAuth::check_authorize( array( 'client_id' => 'sve_c_' . str_repeat( 'ab', 12 ), 'redirect_uri' => 'http://127.0.0.1:4000/cb' ) + $request )['fatal'] ) );
+	assert( isset( OAuth::check_authorize( array( 'client_id' => 'sve_c_' . str_repeat( 'cd', 12 ), 'redirect_uri' => 'https://evil.example/cb' ) + $request )['fatal'] ) );
+
 	assert( 'unsupported_grant_type' === OAuth::exchange( array( 'grant_type' => 'password' ) )['error'] );
 
 	// Expiry.
@@ -123,7 +136,7 @@ namespace {
 	// Disconnect.
 	$again = $exchange( OAuth::create_code( $id, 7, $uri, $challenge ) );
 	assert( $again['ok'] && null !== OAuth::grant( $again['body']['access_token'] ) );
-	assert( 1 === count( OAuth::summary() ) );
+	assert( 2 === count( OAuth::summary() ), "the app plus the adopted desktop client" );
 	OAuth::revoke_all();
 	assert( null === OAuth::grant( $again['body']['access_token'] ) && array() === OAuth::summary() );
 

@@ -151,7 +151,7 @@ final class AdminPage {
 			),
 			'claude-desktop' => array(
 				'label' => 'Claude Desktop (claude_desktop_config.json)',
-				'text'  => $json( array( 'mcpServers' => array( $name => array( 'command' => 'npx', 'args' => array( '-y', 'mcp-remote', $endpoint, '--header', 'Authorization:${SVE_AUTH}' ), 'env' => array( 'SVE_AUTH' => $bearer ) ) ) ) ),
+				'text'  => $json( array( 'mcpServers' => array( $name => array( 'command' => 'npx', 'args' => array( '-y', 'mcp-remote', $endpoint, '--header', 'X-SVE-Key:${SVE_KEY}' ), 'env' => array( 'SVE_KEY' => $key ) ) ) ) ),
 			),
 			'cursor'         => array(
 				'label' => 'Cursor (.cursor/mcp.json)',

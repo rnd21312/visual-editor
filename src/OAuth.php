@@ -24,9 +24,9 @@ final class OAuth {
 
 	private const CODE_TTL = 60;
 
-	private const ACCESS_TTL = 3600;
+	private const ACCESS_TTL = 86400; // A day: fewer refreshes, and revoking still stops it at once.
 
-	private const REFRESH_TTL = 2592000; // 30 days.
+	private const REFRESH_TTL = 7776000; // 90 days, renewed on every refresh.
 
 	private const MAX_CLIENTS = 50;
 
@@ -110,6 +110,39 @@ final class OAuth {
 	}
 
 	/**
+	 * Whether an address is one of the app's registered ones. Loopback addresses match on any port (RFC 8252 7.3):
+	 * desktop tools open a new random port every session but keep the client_id they registered once.
+	 *
+	 * @param array<int, string> $registered The app's addresses.
+	 */
+	public static function uri_registered( string $uri, array $registered ): bool {
+		if ( in_array( $uri, $registered, true ) ) {
+			return true;
+		}
+		$want = self::loopback_key( $uri );
+		if ( null === $want ) {
+			return false;
+		}
+		foreach ( $registered as $address ) {
+			if ( self::loopback_key( (string) $address ) === $want ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/** Path and query of a loopback http address (the part that must match), or null for any other address. */
+	private static function loopback_key( string $address ): ?string {
+		$parts = wp_parse_url( $address );
+		if ( ! is_array( $parts ) || 'http' !== strtolower( (string) ( $parts['scheme'] ?? '' ) ) || ! in_array( strtolower( (string) ( $parts['host'] ?? '' ) ), array( 'localhost', '127.0.0.1', '[::1]' ), true ) ) {
+			return null;
+		}
+
+		return ( $parts['path'] ?? '' ) . '?' . ( $parts['query'] ?? '' );
+	}
+
+	/**
 	 * Dynamic client registration.
 	 *
 	 * @param array<string, mixed> $meta What the app sent.
@@ -144,6 +177,39 @@ final class OAuth {
 	}
 
 	/**
+	 * @return array<string, mixed>
+	 */
+	private static function adopt( string $id, string $uri ): array {
+		$new = array( 'name' => 'AI app', 'uris' => array( $uri ), 'created' => time(), 'last_used' => 0 );
+		self::mutate(
+			static function ( array &$state ) use ( $id, $new ): void {
+				$state['clients'][ $id ] = $state['clients'][ $id ] ?? $new;
+			}
+		);
+
+		return self::client( $id ) ?? $new;
+	}
+
+	/**
+	 * The level this administrator already approved for this app, so returning sessions skip the consent page.
+	 */
+	public static function approved( string $client, int $user ): ?string {
+		$level = self::client( $client )['approved'][ $user ] ?? null;
+
+		return is_string( $level ) && in_array( $level, Api::LEVELS, true ) ? $level : null;
+	}
+
+	private static function remember( string $client, int $user, string $level ): void {
+		self::mutate(
+			static function ( array &$state ) use ( $client, $user, $level ): void {
+				if ( isset( $state['clients'][ $client ] ) ) {
+					$state['clients'][ $client ]['approved'][ $user ] = $level;
+				}
+			}
+		);
+	}
+
+	/**
 	 * Checks an authorization request. "fatal" means show an error page (never redirect to an unchecked
 	 * address); "error" means redirect back to the app with that OAuth error.
 	 *
@@ -151,9 +217,15 @@ final class OAuth {
 	 * @return array<string, mixed>
 	 */
 	public static function check_authorize( array $q ): array {
-		$client = self::client( (string) ( $q['client_id'] ?? '' ) );
+		$id     = (string) ( $q['client_id'] ?? '' );
+		$client = self::client( $id );
 		$uri    = (string) ( $q['redirect_uri'] ?? '' );
-		if ( null === $client || ! in_array( $uri, $client['uris'], true ) ) {
+		if ( null === $client && 1 === preg_match( '/^sve_c_[a-f0-9]{24}$/', $id ) && null !== self::loopback_key( $uri ) && self::redirect_uri_ok( $uri ) ) {
+			// A desktop tool kept a client_id this site forgot ("Disconnect all", or the oldest app dropped): it can
+			// only receive codes on this computer and the administrator still approves, so register it again.
+			$client = self::adopt( $id, $uri );
+		}
+		if ( null === $client || ! self::uri_registered( $uri, $client['uris'] ) ) {
 			return array( 'fatal' => 'This app is not registered, or its redirect address does not match.' );
 		}
 
@@ -227,7 +299,7 @@ final class OAuth {
 				static function ( array &$state ) use ( $p, $token, $fail ): array {
 					$hash = hash( 'sha256', $token );
 					$rec  = $state['tokens'][ $hash ] ?? null;
-					if ( ! is_array( $rec ) || 'r' !== $rec['t'] || $rec['e'] < time() || $rec['c'] !== (string) ( $p['client_id'] ?? '' ) || ! isset( $state['clients'][ $rec['c'] ] ) ) {
+					if ( ! is_array( $rec ) || 'r' !== $rec['t'] || $rec['e'] < time() || ( '' !== (string) ( $p['client_id'] ?? '' ) && $rec['c'] !== (string) $p['client_id'] ) || ! isset( $state['clients'][ $rec['c'] ] ) ) {
 						return $fail( 'invalid_grant', 'The refresh token is unknown, used or expired.' );
 					}
 					// Rotated: the old one stops working after a short grace, so two sessions refreshing at once do not lock each other out.
@@ -467,7 +539,7 @@ final class OAuth {
 		}
 
 		if ( ! is_user_logged_in() ) {
-			wp_safe_redirect( wp_login_url( add_query_arg( array( 'sve_oauth' => 'authorize' ) + $q, home_url( '/' ) ) ) );
+			wp_safe_redirect( wp_login_url( add_query_arg( array_map( 'rawurlencode', array( 'sve_oauth' => 'authorize' ) + $q ), home_url( '/' ) ) ) );
 			exit;
 		}
 		if ( ! current_user_can( 'manage_options' ) ) {
@@ -482,12 +554,19 @@ final class OAuth {
 		if ( 'POST' === ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
 			check_admin_referer( 'sve_oauth' );
 			if ( 'allow' === ( $_POST['sve_decision'] ?? '' ) && ! isset( $check['error'] ) ) { // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
-				$this->back( $check, array( 'code' => self::create_code( $check['client_id'], get_current_user_id(), $check['uri'], $check['challenge'], $this->chosen_level() ) ) );
+				$level = $this->chosen_level();
+				self::remember( $check['client_id'], get_current_user_id(), $level );
+				$this->back( $check, array( 'code' => self::create_code( $check['client_id'], get_current_user_id(), $check['uri'], $check['challenge'], $level ) ) );
 			}
 			$this->back( $check, array( 'error' => $check['error'] ?? 'access_denied' ) );
 		}
 		if ( isset( $check['error'] ) ) {
 			$this->back( $check, array( 'error' => $check['error'] ) );
+		}
+		// Approved before by this administrator: no second click (the app still proves itself with PKCE).
+		$known = self::approved( $check['client_id'], get_current_user_id() );
+		if ( null !== $known ) {
+			$this->back( $check, array( 'code' => self::create_code( $check['client_id'], get_current_user_id(), $check['uri'], $check['challenge'], $known ) ) );
 		}
 
 		$options = '';

@@ -547,7 +547,8 @@ final class RestController {
 		}
 		if ( 401 === (int) ( $data['status'] ?? 0 ) ) {
 			// Tells OAuth-capable clients (Claude.ai connectors) where to find the authorization server.
-			$response->header( 'WWW-Authenticate', 'Bearer realm="visual-editor", resource_metadata="' . OAuth::resource_metadata_url() . '"' );
+			$invalid = 'sve_bad_token' === $error->get_error_code() ? ', error="invalid_token"' : '';
+			$response->header( 'WWW-Authenticate', 'Bearer realm="visual-editor"' . $invalid . ', resource_metadata="' . OAuth::resource_metadata_url() . '"' );
 		}
 
 		return $response;
