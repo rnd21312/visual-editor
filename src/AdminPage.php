@@ -229,17 +229,17 @@ final class AdminPage {
 				<p><?php esc_html_e( 'No key yet.', 'visual-editor' ); ?></p>
 			<?php else : ?>
 				<table class="widefat striped"><thead><tr><th><?php esc_html_e( 'Key', 'visual-editor' ); ?></th><th><?php esc_html_e( 'May', 'visual-editor' ); ?></th><th><?php esc_html_e( 'Acts as', 'visual-editor' ); ?></th><th><?php esc_html_e( 'Last used · calls', 'visual-editor' ); ?></th><th></th></tr></thead><tbody>
-				<?php foreach ( $status['keys'] as $key ) : ?>
+				<?php foreach ( $status['keys'] as $row ) : ?>
 					<tr>
-						<td><strong><?php echo esc_html( $key['label'] ); ?></strong> <code><?php echo esc_html( $key['hint'] ); ?></code></td>
-						<td><select name="levels[<?php echo esc_attr( $key['id'] ); ?>]">
+						<td><strong><?php echo esc_html( $row['label'] ); ?></strong> <code><?php echo esc_html( $row['hint'] ); ?></code></td>
+						<td><select name="levels[<?php echo esc_attr( $row['id'] ); ?>]">
 							<?php foreach ( $levels as $value => $label ) : ?>
-								<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $key['level'], $value ); ?>><?php echo esc_html( $label ); ?></option>
+								<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $row['level'], $value ); ?>><?php echo esc_html( $label ); ?></option>
 							<?php endforeach; ?>
 						</select></td>
-						<td><?php echo esc_html( $key['user'] ); ?></td>
-						<td><?php echo esc_html( $time( (int) $key['lastUsed'] ) . ' · ' . (int) $key['calls'] ); ?></td>
-						<td><button class="button" name="sve_do" value="revoke" onclick="this.form.id.value='<?php echo esc_js( $key['id'] ); ?>';return confirm('<?php echo esc_js( __( 'Revoke the key? Every AI tool using it stops working immediately.', 'visual-editor' ) ); ?>')"><?php esc_html_e( 'Revoke', 'visual-editor' ); ?></button></td>
+						<td><?php echo esc_html( $row['user'] ); ?></td>
+						<td><?php echo esc_html( $time( (int) $row['lastUsed'] ) . ' · ' . (int) $row['calls'] ); ?></td>
+						<td><button class="button" name="sve_do" value="revoke" onclick="this.form.id.value='<?php echo esc_js( $row['id'] ); ?>';return confirm('<?php echo esc_js( __( 'Revoke the key? Every AI tool using it stops working immediately.', 'visual-editor' ) ); ?>')"><?php esc_html_e( 'Revoke', 'visual-editor' ); ?></button></td>
 					</tr>
 				<?php endforeach; ?>
 				</tbody></table>
@@ -317,13 +317,31 @@ final class AdminPage {
 	</div>
 
 	<script>
-		document.querySelectorAll('[data-sve-copy]').forEach(function (button) {
-			button.addEventListener('click', function () {
+		(function () {
+			document.addEventListener('click', function (e) {
+				var button = e.target.closest ? e.target.closest('[data-sve-copy]') : null;
+				if (!button) return;
 				var text = document.getElementById(button.dataset.sveCopy).textContent;
 				if (navigator.clipboard) navigator.clipboard.writeText(text);
 				button.textContent = '✓';
 			});
-		});
+			// Every form on this page saves in the background and redraws the page: no reload.
+			document.addEventListener('submit', function (e) {
+				var form = e.target;
+				if (!form.closest || !form.closest('.sve-ai') || !window.fetch || !window.DOMParser) return;
+				e.preventDefault();
+				var data = e.submitter ? new FormData(form, e.submitter) : new FormData(form);
+				form.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+				fetch(form.getAttribute('action') || location.href, { method: 'POST', body: data, credentials: 'same-origin' })
+					.then(function (r) { return r.text(); })
+					.then(function (html) {
+						var next = new DOMParser().parseFromString(html, 'text/html').querySelector('.sve-ai');
+						if (!next) throw new Error('bad response');
+						document.querySelector('.sve-ai').innerHTML = next.innerHTML;
+					})
+					.catch(function () { form.submit(); });
+			}, true);
+		})();
 	</script>
 </div>
 		<?php
