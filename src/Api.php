@@ -295,7 +295,7 @@ final class Api {
 	 */
 	public static function authenticate( WP_REST_Request $request ) {
 		$settings = self::settings();
-		if ( ! $settings['enabled'] || array() === $settings['keys'] ) {
+		if ( ! $settings['enabled'] ) {
 			return new WP_Error( 'sve_api_disabled', 'The AI API is switched off. Turn it on in the dashboard (AI (MCP) page).', array( 'status' => 403 ) );
 		}
 
@@ -341,6 +341,10 @@ final class Api {
 		}
 		if ( '' === $token ) {
 			return new WP_Error( 'sve_no_key', 'Missing API key: no Authorization header reached WordPress.', array( 'status' => 401 ) );
+		}
+		// An expired or revoked OAuth token is not a guessed key: answer 401 so the app refreshes or signs in again, and do not count it.
+		if ( str_starts_with( $token, 'sve_at_' ) ) {
+			return new WP_Error( 'sve_bad_token', 'The access token expired or was revoked. Refresh it or connect the app again.', array( 'status' => 401 ) );
 		}
 
 		$bucket = 'sve_fail_' . md5( self::ip() );

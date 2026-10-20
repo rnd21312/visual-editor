@@ -230,7 +230,8 @@ final class OAuth {
 					if ( ! is_array( $rec ) || 'r' !== $rec['t'] || $rec['e'] < time() || $rec['c'] !== (string) ( $p['client_id'] ?? '' ) || ! isset( $state['clients'][ $rec['c'] ] ) ) {
 						return $fail( 'invalid_grant', 'The refresh token is unknown, used or expired.' );
 					}
-					unset( $state['tokens'][ $hash ] ); // Rotated: the old one stops working.
+					// Rotated: the old one stops working after a short grace, so two sessions refreshing at once do not lock each other out.
+					$state['tokens'][ $hash ]['e'] = min( (int) $rec['e'], time() + 60 );
 					$state['clients'][ $rec['c'] ]['last_used'] = time();
 
 					return array( 'ok' => true, 'body' => self::issue( $state, $rec['c'], (int) $rec['u'], self::level_of( $rec ) ) );
