@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [1.2.0]
+
+### Added (MCP)
+- `export_site` (admin keys): exports the whole front end to a private link valid for a day, with a summary (pages, layout posts, menus, settings, media). The file never passes through the AI.
+- `import_site` (admin keys): downloads such a link from another site and imports it; `preview: true` only describes it; `media`, `max_media`, `theme`, `replace` as on the Site transfer page. An AI connected to two sites can move a front end from one to the other.
+
 ## [1.1.0]
 
 ### Added

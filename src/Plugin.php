@@ -21,6 +21,7 @@ final class Plugin {
 		EditorScreen::hooks();
 		AdminPage::hooks();
 		TransferPage::hooks();
+		SiteTransfer::hooks();
 		( new OAuth() )->hooks();
 		add_action( 'init', array( Forms::class, 'register' ) );
 		add_action( 'rest_api_init', array( RestController::class, 'register_routes' ) );

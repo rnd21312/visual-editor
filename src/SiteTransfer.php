@@ -249,11 +249,140 @@ final class SiteTransfer {
 		return (string) preg_replace( '#-(?:\d+x\d+|scaled|rotated)(\.[a-z0-9]+)$#i', '$1', $url );
 	}
 
+	/* ------------------------------------------------------------------ export link (for AI tools) */
+
+	private const LINKS = 'sve_transfer_links';
+
+	private const LINK_TTL = DAY_IN_SECONDS;
+
+	public static function hooks(): void {
+		add_action(
+			'rest_api_init',
+			static function (): void {
+				register_rest_route( 'sve/v1', '/transfer/(?P<token>[a-f0-9]{48})', array( 'methods' => 'GET', 'callback' => array( self::class, 'serve' ), 'permission_callback' => '__return_true', 'show_in_index' => false ) );
+			}
+		);
+	}
+
+	private static function folder(): string {
+		$dir = (string) wp_get_upload_dir()['basedir'] . '/sve-transfer';
+		if ( ! is_dir( $dir ) ) {
+			wp_mkdir_p( $dir );
+			file_put_contents( $dir . '/index.php', '<?php // Silence.' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+			file_put_contents( $dir . '/.htaccess', "Require all denied\nDeny from all\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		}
+
+		return $dir;
+	}
+
+	/**
+	 * Writes the export to a private file and returns a secret link that works for a day: another site's
+	 * import_site downloads it from there, so the large file never passes through the AI.
+	 *
+	 * @return array<string, mixed>
+	 */
+	public static function export_link(): array {
+		$links = (array) get_option( self::LINKS, array() );
+		foreach ( $links as $token => $expires ) {
+			if ( (int) $expires < time() ) {
+				wp_delete_file( self::folder() . '/' . $token . '.json' );
+				unset( $links[ $token ] );
+			}
+		}
+
+		$data  = self::export();
+		$token = bin2hex( random_bytes( 24 ) );
+		$json  = (string) wp_json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+		file_put_contents( self::folder() . '/' . $token . '.json', $json ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		$links[ $token ] = time() + self::LINK_TTL;
+		update_option( self::LINKS, $links, false );
+		Store::log( 'export', 'Exported the front end (link valid for a day)' );
+
+		return array(
+			'link'    => rest_url( 'sve/v1/transfer/' . $token ),
+			'expires' => gmdate( 'c', time() + self::LINK_TTL ),
+			'size'    => size_format( strlen( $json ) ),
+		) + self::summary( $data );
+	}
+
+	public static function serve( \WP_REST_Request $request ): \WP_REST_Response {
+		$token   = (string) $request['token'];
+		$expires = (int) ( ( (array) get_option( self::LINKS, array() ) )[ $token ] ?? 0 );
+		$file    = self::folder() . '/' . $token . '.json';
+		if ( $expires < time() || ! is_file( $file ) ) {
+			return new \WP_REST_Response( array( 'error' => 'This export link expired or does not exist. Export again.' ), 404 );
+		}
+		nocache_headers();
+		header( 'Content-Type: application/json; charset=utf-8' );
+		readfile( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile
+		exit;
+	}
+
+	/**
+	 * What an export holds, in numbers.
+	 *
+	 * @param array<string, mixed> $data Export.
+	 * @return array<string, mixed>
+	 */
+	public static function summary( array $data ): array {
+		$types = array();
+		foreach ( (array) $data['posts'] as $post ) {
+			$types[ $post['type'] ] = ( $types[ $post['type'] ] ?? 0 ) + 1;
+		}
+
+		return array(
+			'source'  => $data['source'],
+			'theme'   => $data['theme'],
+			'posts'   => $types,
+			'pages'   => array_values( array_map( static fn ( array $p ): string => $p['slug'], array_filter( (array) $data['posts'], static fn ( array $p ): bool => 'page' === $p['type'] ) ) ),
+			'menus'   => array_map( static fn ( array $m ): string => $m['name'] . ' (' . count( $m['items'] ) . ')', (array) ( $data['menus']['menus'] ?? array() ) ),
+			'options' => count( (array) $data['options'] ),
+			'media'   => count( (array) ( $data['media'] ?? array() ) ),
+		);
+	}
+
+	/**
+	 * Downloads an export (a link from export_site on another site) and imports it, or only describes it.
+	 *
+	 * @param array<string, mixed> $a url, preview, media, theme, replace.
+	 * @return array<string, mixed>
+	 */
+	public static function import_link( array $a ): array {
+		$url = trim( (string) ( $a['url'] ?? '' ) );
+		if ( ! wp_http_validate_url( $url ) ) {
+			throw new RuntimeException( 'Give url: the link export_site returned on the other site.' );
+		}
+		$response = wp_remote_get( $url, array( 'timeout' => 120, 'limit_response_size' => 200 * MB_IN_BYTES ) );
+		if ( is_wp_error( $response ) ) {
+			throw new RuntimeException( 'Could not download the export: ' . $response->get_error_message() );
+		}
+		$data = json_decode( (string) wp_remote_retrieve_body( $response ), true );
+		if ( 200 !== (int) wp_remote_retrieve_response_code( $response ) || ! is_array( $data ) ) {
+			throw new RuntimeException( 'The link did not return an export (HTTP ' . (int) wp_remote_retrieve_response_code( $response ) . '). It may have expired: export again.' );
+		}
+		if ( untrailingslashit( (string) ( $data['source'] ?? '' ) ) === untrailingslashit( home_url() ) ) {
+			throw new RuntimeException( 'This export comes from this same site.' );
+		}
+		if ( ! empty( $a['preview'] ) ) {
+			return array( 'preview' => true, 'target' => home_url(), 'installedTheme' => wp_get_theme( (string) ( $data['theme']['stylesheet'] ?? '' ) )->exists() ) + self::summary( $data );
+		}
+
+		return self::import(
+			$data,
+			array(
+				'media'     => ! array_key_exists( 'media', $a ) || ! empty( $a['media'] ),
+				'theme'     => ! array_key_exists( 'theme', $a ) || ! empty( $a['theme'] ),
+				'replace'   => ! array_key_exists( 'replace', $a ) || ! empty( $a['replace'] ),
+				'max_media' => isset( $a['max_media'] ) ? max( 0, (int) $a['max_media'] ) : self::MAX_MEDIA,
+			)
+		);
+	}
+
 	/* ------------------------------------------------------------------ import */
 
 	/**
 	 * @param array<string, mixed> $data    Export file.
-	 * @param array<string, bool>  $options media (copy images), theme (switch theme), replace (update pages with the same slug).
+	 * @param array<string, mixed> $options media (copy images), max_media, theme (switch theme), replace (update pages with the same slug).
 	 * @return array{done: array<int, string>, warnings: array<int, string>}
 	 */
 	public static function import( array $data, array $options ): array {
@@ -286,9 +415,9 @@ final class SiteTransfer {
 		$id_map   = array();
 		$uploads  = (string) ( $data['uploads'] ?? $data['source'] . '/wp-content/uploads' );
 		if ( ! empty( $options['media'] ) ) {
-			list( $urls, $id_map, $media_warnings ) = self::copy_media( (array) ( $data['media'] ?? array() ) );
+			list( $urls, $id_map, $media_warnings ) = self::copy_media( (array) ( $data['media'] ?? array() ), (int) ( $options['max_media'] ?? self::MAX_MEDIA ) );
 			$warnings = array_merge( $warnings, $media_warnings );
-			$done[]   = count( $id_map ) . ' images and files copied.';
+			$done[]   = count( $urls ) . ' images and files copied.';
 		}
 
 		// 3. Addresses: copied files first, then any other address of the old site.
@@ -418,7 +547,7 @@ final class SiteTransfer {
 	 * @param array<int, array{id: int, url: string}> $media Media index of the export.
 	 * @return array{0: array<string, string>, 1: array<int, int>, 2: array<int, string>}
 	 */
-	private static function copy_media( array $media ): array {
+	private static function copy_media( array $media, int $max = self::MAX_MEDIA ): array {
 		require_once ABSPATH . 'wp-admin/includes/file.php';
 		require_once ABSPATH . 'wp-admin/includes/media.php';
 		require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -426,7 +555,7 @@ final class SiteTransfer {
 		$urls     = array();
 		$ids      = array();
 		$warnings = array();
-		foreach ( array_slice( $media, 0, self::MAX_MEDIA ) as $item ) {
+		foreach ( array_slice( $media, 0, $max ) as $item ) {
 			$url = (string) $item['url'];
 			if ( '' === $url ) {
 				continue;
@@ -448,8 +577,8 @@ final class SiteTransfer {
 				$ids[ (int) $item['id'] ] = (int) $id;
 			}
 		}
-		if ( count( $media ) > self::MAX_MEDIA ) {
-			$warnings[] = 'Only the first ' . self::MAX_MEDIA . ' of ' . count( $media ) . ' files were copied; the others still load from the old site.';
+		if ( count( $media ) > $max ) {
+			$warnings[] = 'Only the first ' . $max . ' of ' . count( $media ) . ' files were copied; the others still load from the old site.';
 		}
 
 		return array( $urls, $ids, $warnings );

@@ -73,6 +73,8 @@ WORKFLOW
    uploads; include_css + match "some-class" finds the CSS that styles a class), list_files / read_file (theme, plugin and
    mu-plugin files, admin keys). To move a page to another site: export_page part "html" and part "css" here, then on the
    other site upload_media for the images, create_content with that html as builder.source and add_css (scope page).
+   To move the WHOLE front end (all pages, templates, menus, theme settings, editor styles) to another connected site:
+   export_site here → import_site(url, preview:true) on the other site → tell the person → import_site(url).
 3. Look closely: inspect_element(url, selector) → markup, attributes, ancestors, matching CSS rules, existing
    editor changes, and (when the editor is open) computed styles, size and a screenshot. screenshot(url) for the page.
 4. Change: see "editing" below. 5. Verify with inspect_element/screenshot. 6. Report to the person.
