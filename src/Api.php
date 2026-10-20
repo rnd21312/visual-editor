@@ -341,6 +341,11 @@ final class Api {
 		if ( self::PROBE === $token ) {
 			return new WP_Error( 'sve_bad_key', 'Wrong API key.', array( 'status' => 401 ) );
 		}
+		$raw = trim( (string) $request->get_header( 'authorization' ) . (string) $request->get_header( 'x-sve-key' ) );
+		if ( '' === $token && '' !== $raw ) {
+			// Something was sent, but not a key (e.g. "${SVE_AUTH}" that the tool did not expand): see below for why not 401.
+			return new WP_Error( 'sve_bad_key', 'The key header arrived without a usable key (got "' . substr( $raw, 0, 12 ) . '…"). Check the AI tool settings: Authorization: Bearer sve_… or X-SVE-Key: sve_…', array( 'status' => 403 ) );
+		}
 		if ( '' === $token ) {
 			return new WP_Error( 'sve_no_key', 'Missing API key: no Authorization header reached WordPress.', array( 'status' => 401 ) );
 		}
@@ -362,7 +367,10 @@ final class Api {
 			wp_cache_set( $bucket, $fails + 1, 'transient' );
 		}
 
-		return new WP_Error( 'sve_bad_key', 'Missing or wrong API key.', array( 'status' => 401 ) );
+		// A pasted key that is wrong (revoked, mistyped, an unexpanded ${VAR}) is answered with 403, not 401: a 401
+		// makes tools such as mcp-remote start OAuth, and as the wrong key header overrides the OAuth token they
+		// get, they open a new sign-in tab every minute. The key has to be fixed in the tool's settings instead.
+		return new WP_Error( 'sve_bad_key', 'Wrong API key: it was revoked or mistyped. Copy a valid key from the AI (MCP) page into the AI tool settings (or remove the key header to sign in with OAuth).', array( 'status' => 403 ) );
 	}
 
 	/**

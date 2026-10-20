@@ -69,6 +69,10 @@ WORKFLOW
 1. get_site_overview — theme, plugins, post types, menus, templates, components, tokens, your permission level.
 2. Find what to change: list_content / get_content (pages, posts, products, builder templates), list_templates,
    get_page_outline(url) for the structure of any page, find_elements(url, text|role) to locate "that button".
+   Deeper view: get_page_source (raw HTML), get_page_assets (every CSS/JS file and where it comes from — theme, plugin,
+   uploads; include_css + match "some-class" finds the CSS that styles a class), list_files / read_file (theme, plugin and
+   mu-plugin files, admin keys). To move a page to another site: export_page part "html" and part "css" here, then on the
+   other site upload_media for the images, create_content with that html as builder.source and add_css (scope page).
 3. Look closely: inspect_element(url, selector) → markup, attributes, ancestors, matching CSS rules, existing
    editor changes, and (when the editor is open) computed styles, size and a screenshot. screenshot(url) for the page.
 4. Change: see "editing" below. 5. Verify with inspect_element/screenshot. 6. Report to the person.
