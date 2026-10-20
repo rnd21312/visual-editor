@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.0]
+
+### Added
+- **Site transfer: choose what to move.** Export the whole site or any parts: design, pages (all or picked ones), templates and layouts, menus, blog posts, products (with variations, attributes, categories, brands, images), Code Snippets, other plugin / WooCommerce settings, theme files (zip). Never included: orders, users, form entries, licences and API keys.
+- **Step-by-step import with a live progress bar**: theme files → product attributes → categories → images → pages / posts / products → their meta → menus → settings → snippets → editor → caches. Each step is a short request, so large sites do not hit the hosting time limit; an interrupted import continues where it stopped.
+- Import from an export link (no upload size limit), or from a file.
+- Importing only the look keeps the target site's own products: menu items that point to products or categories of the old site are matched by slug to the ones on this site.
+- MCP: `export_site` takes `groups` and `pages`; `import_site` takes `groups`, returns a `job` and is called again with `{job}` until `done`.
+- **Persian (fa_IR) translation** of every dashboard screen.
+
+### Fixed
+- Importing a package into the same site it came from is refused with a clear message.
+
 ## [1.2.0]
 
 ### Added (MCP)

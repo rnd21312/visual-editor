@@ -298,7 +298,7 @@ final class AdminPage {
 				<button class="button" name="sve_do" value="disconnect" onclick="return confirm('<?php echo esc_js( __( 'Disconnect every app? They have to be approved again.', 'visual-editor' ) ); ?>')"><?php esc_html_e( 'Disconnect all apps', 'visual-editor' ); ?></button>
 			</form>
 		<?php endif; ?>
-		<p class="description"><?php esc_html_e( 'You choose the permission level on the consent page; the app acts as the administrator who approved it. Access tokens last an hour and refresh by themselves; switching AI access off stops them at once.', 'visual-editor' ); ?></p>
+		<p class="description"><?php esc_html_e( 'You choose the permission level on the consent page; the app acts as the administrator who approved it. Access tokens last a day and refresh by themselves; switching AI access off stops them at once.', 'visual-editor' ); ?></p>
 	</div>
 
 	<div class="sve-card">

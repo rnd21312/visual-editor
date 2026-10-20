@@ -212,8 +212,9 @@ final class Tools {
 		/* ---- settings, plugins, any API ---- */
 		$add( 'update_settings', 'live', 'Change site settings (title, tagline, front page, reading, permalinks, timezone, WooCommerce currency…). Admin keys may change other options too.', self::obj( array( 'values' => self::any( '{option: value}' ) ), array( 'values' ) ), static fn ( array $a ): mixed => self::logged( Content::update_options( (array) $a['values'], Api::allows( 'admin' ) ), 'update_settings', 'Settings: ' . implode( ', ', array_keys( (array) $a['values'] ) ) ) );
 		$add( 'manage_plugin', 'admin', 'Install (from wordpress.org), activate or deactivate a plugin.', self::obj( array( 'action' => self::enum( array( 'install', 'activate', 'deactivate' ), 'Action' ), 'plugin' => self::str( 'Slug (install) or file / folder (activate, deactivate)' ) ), array( 'action', 'plugin' ) ), static fn ( array $a ): mixed => self::logged( Content::plugin_action( (string) $a['action'], (string) $a['plugin'] ), 'manage_plugin', (string) $a['action'] . ' ' . (string) $a['plugin'] ) );
-		$add( 'export_site', 'admin', 'Export the whole front end of THIS site (Visual Editor document, builder templates, pages and layout posts such as Elementor/theme templates, menus, widgets, theme + customizer + theme options, front page, media list; not products, posts, orders or users) to a private link valid for a day. Give that link to import_site on the other site.', self::obj( array() ), static fn (): array => \VisualEditor\SiteTransfer::export_link() );
-		$add( 'import_site', 'admin', 'Import a front end exported with export_site on another site into THIS site. Run with preview:true first and tell the person what will be replaced; the theme and page builders must be installed here. Overwrites pages with the same address (replace), menus with the same name, theme settings.', self::obj( array( 'url' => self::str( 'The link export_site returned' ), 'preview' => self::bool( 'Only describe what the export holds (do this first)' ), 'media' => self::bool( 'Copy images into this media library (default true)' ), 'max_media' => self::int( 'Max files to copy in this call (default 400; lower it if the request times out)' ), 'theme' => self::bool( 'Switch to the exported theme when installed (default true)' ), 'replace' => self::bool( 'Replace pages/templates with the same address instead of adding copies (default true)' ) ), array( 'url' ) ), array( \VisualEditor\SiteTransfer::class, 'import_link' ) );
+		$parts = self::any( 'Parts: design, pages, layouts, menus, posts, products, snippets, settings, theme_files. Default: design, pages, layouts, menus (the look, not the content). All of them = the whole site except orders and users.', 'array' );
+		$add( 'export_site', 'admin', 'Export this site — all of it or the parts you choose — to a private link valid for a day (a zip when theme_files is included). Give the link to import_site on the other site; the file never passes through you.', self::obj( array( 'groups' => $parts, 'pages' => self::any( 'Only these page ids (default: all pages)', 'array' ) ) ), static fn ( array $a ): array => \VisualEditor\SiteTransfer::export_link( (array) ( $a['groups'] ?? array() ), array_map( 'intval', (array) ( $a['pages'] ?? array() ) ) ) );
+		$add( 'import_site', 'admin', 'Import a package made by export_site on another site into THIS site. First call with url + preview:true and tell the person what will be replaced. Then call with url (and groups to import only some parts): it starts a job and works ~20 s; while the answer has done:false, call again with {job} until done. Content not in the package (e.g. this site\'s own products when only the look is imported) stays.', self::obj( array( 'url' => self::str( 'The link export_site returned' ), 'job' => self::str( 'Continue this job' ), 'preview' => self::bool( 'Only describe the package' ), 'groups' => $parts, 'media' => self::bool( 'Copy images into this media library (default true)' ), 'max_media' => self::int( 'Max files to copy (default 2000)' ), 'theme' => self::bool( 'Switch to the exported theme (default true)' ), 'replace' => self::bool( 'Replace pages/products/templates with the same address (default true)' ) ) ), array( self::class, 'import_site' ) );
 		$add( 'wp_rest', 'read', 'Call any WordPress or plugin REST route as the key\'s user (GET for every key; POST/PUT/PATCH/DELETE need an admin key). E.g. GET /wp/v2/types, GET /wc/v3/products, POST /wp/v2/comments.', self::obj( array( 'method' => self::enum( array( 'GET', 'POST', 'PUT', 'PATCH', 'DELETE' ), 'HTTP method' ), 'route' => self::str( 'Route, e.g. /wp/v2/pages' ), 'params' => self::any( 'Query parameters' ), 'body' => self::any( 'JSON body' ) ), array( 'route' ) ), array( self::class, 'wp_rest' ) );
 
 		/* ---- collaboration ---- */
@@ -735,6 +736,23 @@ final class Tools {
 		}
 
 		return $data;
+	}
+
+	/**
+	 * @param array<string, mixed> $a Arguments.
+	 * @return array<string, mixed>
+	 */
+	public static function import_site( array $a ): array {
+		if ( '' !== (string) ( $a['job'] ?? '' ) ) {
+			return \VisualEditor\TransferJob::load( (string) $a['job'] )->step();
+		}
+		$url = (string) ( $a['url'] ?? '' );
+		if ( ! empty( $a['preview'] ) ) {
+			return \VisualEditor\TransferJob::preview_url( $url );
+		}
+		$status = \VisualEditor\TransferJob::start_from_url( $url, array_map( 'strval', (array) ( $a['groups'] ?? array() ) ), $a );
+
+		return \VisualEditor\TransferJob::load( (string) $status['job'] )->step() + array( 'summary' => $status['summary'] );
 	}
 
 	/**

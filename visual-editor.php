@@ -3,7 +3,7 @@
  * Plugin Name:       Visual Editor
  * Plugin URI:        https://github.com/rnd21312/visual-editor
  * Description:       Visual site builder for any WordPress theme: build and edit pages, posts, products and templates visually, reusable components, React islands, GSAP motion, design tokens, SEO — and a full MCP server so an AI assistant can see and build the site with you.
- * Version:           1.2.0
+ * Version:           1.3.0
  * Requires at least: 6.5
  * Requires PHP:      8.1
  * Author:            theodore-sooske (Telegram)
@@ -18,7 +18,7 @@ declare(strict_types=1);
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'SVE_VERSION', '1.2.0' );
+define( 'SVE_VERSION', '1.3.0' );
 define( 'SVE_FILE', __FILE__ );
 define( 'SVE_DIR', plugin_dir_path( __FILE__ ) );
 define( 'SVE_URL', plugin_dir_url( __FILE__ ) );
