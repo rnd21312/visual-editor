@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [1.0.2]
+
+### Added (MCP)
+- `get_page_source`: the raw HTML a visitor gets, in windows of up to 120k characters.
+- `get_page_assets`: every stylesheet, inline style, script, font and image of a page with its origin (theme, plugin, uploads, core, external); `include_css` + `match` returns the CSS that styles a class.
+- `export_page`: a page as a portable bundle (body html, all CSS with absolute `url()`, images, scripts) to rebuild on another site.
+- `list_files` / `read_file` (admin keys): read-only access to themes, plugins, mu-plugins and uploads.
+
+### Fixed (auth)
+- A wrong or unexpanded pasted key now gets 403 with a clear message instead of 401. mcp-remote's key header overrode its own OAuth token, so every 401 opened a new sign-in tab.
+- Loopback redirect addresses match on any port (RFC 8252), so desktop tools that reuse their client_id with a new port are not sent to an error page. A forgotten desktop client_id is registered again.
+- An app this administrator already approved skips the consent click. Access tokens last a day, refresh tokens 90 days; refresh works without `client_id`; a rotated refresh token stays valid for 60 seconds.
+- Sites that use only OAuth (no pasted keys) got 403 for every request.
+- Expired OAuth tokens no longer count as wrong keys (IP lockout); `WWW-Authenticate` says `invalid_token`.
+- `X-SVE-Key` is accepted next to an `Authorization` header; the Claude Desktop (mcp-remote) snippet uses it.
+
+### Fixed (dashboard)
+- The AI (MCP) page crashed with a fatal TypeError (`snippets()` got an array) once a key existed.
+- Saving settings and creating, revoking or testing keys no longer reloads the page.
+
 ## [1.0.0]
 
 Merges the Suntourz visual builder into this plugin.
